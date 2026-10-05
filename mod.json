@@ -1,0 +1,14 @@
+{
+	"geode": "5.8.1",
+	"gd": {
+		"win": "2.2081",
+		"mac": "2.2081",
+		"android": "2.2081",
+		"ios": "2.2081"
+	},
+	"id": "ziyyhhk.cathack-menu",
+	"name": "CatHack Menu",
+	"version": "v0.1.0",
+	"developer": "Akira",
+	"description": "Mega Hack style mod menu for Geometry Dash 2.2081. Press Tab to open."
+}
