@@ -114,8 +114,8 @@ std::vector<Window> const& layout() {
 
             // ---- column 8
             {"Display", 8, Extra::Fps, false, {
-                {"Unlock FPS", &s.fpsEnabled, "unlock-fps",
-                 "Uses the FPS value above instead of the default 60."},
+                {"FPS/HZ Bypass", &s.fpsEnabled, "unlock-fps",
+                 "Sets a custom refresh target. Match your monitor when possible; very high rates can affect physics and collision timing. The target is capped at 360 Hz."},
                 {"Frame Extrapolation"}, {"Vertical Sync"}, {"Lock Delta"},
                 {"Borderless Classic"}, {"Fullscreen"},
             }},

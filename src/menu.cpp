@@ -29,12 +29,15 @@ constexpr ImU32 kBlack = IM_COL32(0, 0, 0, 255);
 constexpr float kRowAnim = 0.18f;
 constexpr float kCollapseAnim = 0.20f;
 constexpr float kFadeAnim = 0.14f;
-constexpr int kMenuLayoutVersion = 3;
+constexpr int kMenuLayoutVersion = 4;
+constexpr float kMinFps = 30.f;
+constexpr float kMaxFps = 360.f;
 
 // ---------------------------------------------------------------- state
 struct WinState {
     ImVec2 pos{0.f, 0.f};
     bool hasPos = false;
+    bool manualPos = false;
     bool collapsed = false;
     float openT = 1.f; // 1 = open, 0 = collapsed
 };
@@ -138,9 +141,10 @@ void saveConfig() {
 
     for (auto& [title, ws] : g_win) {
         mod->setSavedValue<bool>("collapsed-" + title, ws.collapsed);
+        mod->setSavedValue<bool>("manual-position-" + title, ws.manualPos);
         auto xKey = "pos-" + title + "-x";
         auto yKey = "pos-" + title + "-y";
-        if (ws.hasPos) {
+        if (ws.hasPos && ws.manualPos) {
             mod->setSavedValue<double>(xKey, ws.pos.x);
             mod->setSavedValue<double>(yKey, ws.pos.y);
         } else {
@@ -176,12 +180,17 @@ void loadConfig() {
             if (x >= 0.0 && y >= 0.0) {
                 ws.pos = ImVec2(static_cast<float>(x), static_cast<float>(y));
                 ws.hasPos = true;
+                ws.manualPos = mod->getSavedValue<bool>("manual-position-" + title, false);
             }
         }
     }
 
     s.speed = static_cast<float>(mod->getSavedValue<double>("speed", s.speed));
-    s.fps = static_cast<float>(mod->getSavedValue<double>("fps", s.fps));
+    s.fps = std::clamp(
+        static_cast<float>(mod->getSavedValue<double>("fps", s.fps)),
+        kMinFps,
+        kMaxFps
+    );
     if (savedLayoutVersion < kMenuLayoutVersion) {
         // The previous default was oversized; start the compact layout at a
         // smaller scale once, then preserve the user's future slider choice.
@@ -198,7 +207,8 @@ void loadConfig() {
 
 void applyFps() {
     auto& s = cat::state();
-    if (s.fpsEnabled && s.fps > 0.f) {
+    if (s.fpsEnabled) {
+        s.fps = std::clamp(s.fps, kMinFps, kMaxFps);
         CCApplication::sharedApplication()->setAnimationInterval(1.0 / static_cast<double>(s.fps));
     } else {
         CCApplication::sharedApplication()->setAnimationInterval(1.0 / 60.0);
@@ -292,6 +302,7 @@ void titleBar(cat::Window const& w, WinState& ws, int enabled) {
         ws.pos.x += ImGui::GetIO().MouseDelta.x;
         ws.pos.y += ImGui::GetIO().MouseDelta.y;
         ws.hasPos = true;
+        ws.manualPos = true;
     }
 
     ws.openT = approach(ws.openT, ws.collapsed ? 0.f : 1.f, ImGui::GetIO().DeltaTime, kCollapseAnim);
@@ -373,12 +384,17 @@ void extraRow(cat::Extra extra) {
         if (ImGui::IsItemDeactivatedAfterEdit()) saveConfig();
     } else if (extra == cat::Extra::Fps) {
         float v = s.fps;
-        if (ImGui::SliderFloat("##fps", &v, 30.f, 1000.f, "FPS %.0f")) {
-            s.fps = v;
+        if (ImGui::SliderFloat("##fps", &v, kMinFps, kMaxFps, "Target %.0f Hz")) {
+            s.fps = std::clamp(v, kMinFps, kMaxFps);
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             if (s.fpsEnabled) applyFps();
             saveConfig();
+        }
+        if (ImGui::IsItemHovered() && ImGui::GetCurrentContext()->HoveredIdTimer > 0.45f) {
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted("Match your monitor's refresh rate when possible. Above 240 Hz, physics or collision timing may feel different; lower the target if gameplay seems off. Maximum: 360 Hz.");
+            ImGui::EndTooltip();
         }
     }
     ImGui::PopItemWidth();
@@ -386,7 +402,7 @@ void extraRow(cat::Extra extra) {
 
 void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH, float maxHeight) {
     auto& ws = g_win[w.title];
-    if (!ws.hasPos) {
+    if (!ws.hasPos || !ws.manualPos) {
         ws.pos = defPos;
         ws.hasPos = true;
     }
@@ -443,7 +459,9 @@ void drawFrame() {
     bool scaleChanged = g_savedLayoutScale <= 0.f || std::abs(g_savedLayoutScale - g_scale) > 0.001f;
     if (g_resetWindowPositions || viewportChanged || scaleChanged) {
         for (auto& w : cat::layout()) {
-            g_win[w.title].hasPos = false;
+            auto& ws = g_win[w.title];
+            ws.hasPos = false;
+            ws.manualPos = false;
         }
         g_savedViewportWidth = io.DisplaySize.x;
         g_savedViewportHeight = io.DisplaySize.y;
@@ -486,7 +504,9 @@ void drawFrame() {
     );
     if (g_savedColumnsPerRow != columnsPerRow) {
         for (auto& w : cat::layout()) {
-            g_win[w.title].hasPos = false;
+            auto& ws = g_win[w.title];
+            ws.hasPos = false;
+            ws.manualPos = false;
         }
         g_savedColumnsPerRow = columnsPerRow;
         saveConfig();
@@ -534,6 +554,7 @@ void drawFrame() {
         if (ws.hasPos && (ws.pos.x < 0.f || ws.pos.y < 0.f ||
             ws.pos.x + width > io.DisplaySize.x || ws.pos.y + maxHeight > io.DisplaySize.y)) {
             ws.hasPos = false;
+            ws.manualPos = false;
         }
         float height = windowHeight(w, ws, rowH, maxHeight);
         colY[col] += height;

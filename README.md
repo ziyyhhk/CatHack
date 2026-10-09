@@ -16,7 +16,7 @@ position and your settings.
 | Cosmetic | No Death Effect | |
 | Level | Noclip | respects anticheat spike |
 | Cheat Safety | Safe Mode, Auto Safe Mode | sets `m_isTestMode` on completion so the run isn't saved |
-| Display | Unlock FPS | `CCApplication::setAnimationInterval` |
+| Display | FPS/HZ Bypass | `CCApplication::setAnimationInterval`, capped at 360 Hz |
 | CatHack | Interface Scale | ImGui font scale |
 
 Every other row is a dimmed placeholder with a "Not implemented yet" tooltip.
@@ -36,8 +36,8 @@ Customiser, Slider Limit, Treasure Room, Unlock Shops and Unlock Vaults.
   track on the right edge.
 - Hover a row for about half a second to get a tooltip (add one with the
   `desc` field of an entry).
-- Windows have a soft shadow, are draggable, and remember their position and
-  collapsed state.
+- Windows have a soft shadow, are draggable, and remember manually moved
+  positions; automatically arranged panels close gaps when neighbors collapse.
 - Panels automatically wrap into additional rows to fit the game viewport;
   oversized panels get an inner scrollbar, and saved positions reset when the
   viewport or interface scale changes.
@@ -70,5 +70,5 @@ Customiser, Slider Limit, Treasure Room, Unlock Shops and Unlock Vaults.
 
 ## Fonts
 
-The default ImGui font is used. To get the Mega Hack look, load a TTF in the
-`setup` callback in `src/menu.cpp` with `io.Fonts->AddFontFromFileTTF(...)`.
+The menu bundles DejaVu Sans under its permissive font license to replace the
+pixel-style ImGui default. The font is loaded from the mod's packaged resources.
