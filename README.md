@@ -4,8 +4,8 @@ Mega Hack style mod menu for Geometry Dash 2.2081, built with Geode + ImGui.
 Press **Tab** to open or close it. Windows are draggable and remember their
 position and your settings.
 
-> **Status: untested.** This was written without a Geode toolchain available,
-> so expect possible binding/signature fixes on first build.
+> **Build status: passing in GitHub Actions.** Individual gameplay hooks still need
+> in-game testing on Geometry Dash 2.2081.
 
 ## Working hacks
 
@@ -14,9 +14,9 @@ position and your settings.
 | Bypass | Text Length, Unlock Icons | local only |
 | Speedhack | Enabled + speed slider | marks run as cheated |
 | Cosmetic | No Death Effect | |
-| Player | Noclip | respects anticheat spike |
+| Level | Noclip | respects anticheat spike |
 | Cheat Safety | Safe Mode, Auto Safe Mode | sets `m_isTestMode` on completion so the run isn't saved |
-| Display | Unlock FPS + FPS box | `CCApplication::setAnimationInterval` |
+| Display | Unlock FPS | `CCApplication::setAnimationInterval` |
 | CatHack | Interface Scale | ImGui font scale |
 
 Every other row is a dimmed placeholder with a "Not implemented yet" tooltip.
@@ -38,6 +38,9 @@ Customiser, Slider Limit, Treasure Room, Unlock Shops and Unlock Vaults.
   `desc` field of an entry).
 - Windows have a soft shadow, are draggable, and remember their position and
   collapsed state.
+- Panels automatically wrap into additional rows to fit the game viewport;
+  oversized panels get an inner scrollbar, and saved positions reset when the
+  viewport or interface scale changes.
 - Animation lengths and colors are constants at the top of `src/menu.cpp`.
 
 ## Adding a hack
@@ -59,9 +62,8 @@ Customiser, Slider Limit, Treasure Room, Unlock Shops and Unlock Vaults.
   members were checked against the Geode docs. The Text Length approach itself
   is untested: if the limit is enforced somewhere other than
   `onTextFieldInsertText`, it won't do anything.
-- If Tab does nothing, imgui-cocos may not be forwarding the key. Hook
-  `CCKeyboardDispatcher::dispatchKeyboardMSG` and call `setOpen()` yourself.
-- Desktop only for now (Tab). Mobile would need an on-screen button.
+- Tab is handled through Geode's global keyboard event, so it works even while
+  ImGui is closed. Mobile still needs an on-screen toggle button.
 
 ## Fonts
 

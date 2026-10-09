@@ -28,6 +28,7 @@ constexpr ImU32 kBlack = IM_COL32(0, 0, 0, 255);
 constexpr float kRowAnim = 0.18f;
 constexpr float kCollapseAnim = 0.20f;
 constexpr float kFadeAnim = 0.14f;
+constexpr int kMenuLayoutVersion = 2;
 
 // ---------------------------------------------------------------- state
 struct WinState {
@@ -40,6 +41,11 @@ struct WinState {
 bool g_open = false;
 float g_fade = 0.f;
 float g_scale = 1.2f; // applied scale (only updated after you let go of the slider)
+float g_savedViewportWidth = 0.f;
+float g_savedViewportHeight = 0.f;
+float g_savedLayoutScale = 0.f;
+int g_savedColumnsPerRow = 0;
+bool g_resetWindowPositions = true;
 std::unordered_map<std::string, WinState> g_win;
 
 // ---------------------------------------------------------------- small helpers
@@ -86,6 +92,17 @@ float rowHeight() {
     return std::floor(ImGui::GetFontSize() + ImGui::GetStyle().FramePadding.y * 2.f + 0.5f);
 }
 
+float windowExpandedHeight(cat::Window const& w, float rowH) {
+    int bodyRows = static_cast<int>(w.entries.size()) + (w.extra != cat::Extra::None ? 1 : 0);
+    return rowH * static_cast<float>(bodyRows + 1) + 2.f;
+}
+
+float windowHeight(cat::Window const& w, WinState const& ws, float rowH, float maxHeight) {
+    maxHeight = std::max(maxHeight, rowH + 2.f);
+    float openHeight = std::max(rowH + 2.f, std::min(windowExpandedHeight(w, rowH), maxHeight));
+    return rowH + (openHeight - rowH) * ws.openT;
+}
+
 // ---------------------------------------------------------------- config
 void saveConfig() {
     auto* mod = Mod::get();
@@ -99,12 +116,22 @@ void saveConfig() {
     mod->setSavedValue<double>("speed", s.speed);
     mod->setSavedValue<double>("fps", s.fps);
     mod->setSavedValue<double>("interface-scale", s.interfaceScale);
+    mod->setSavedValue<int>("menu-layout-version", kMenuLayoutVersion);
+    mod->setSavedValue<double>("menu-viewport-width", g_savedViewportWidth);
+    mod->setSavedValue<double>("menu-viewport-height", g_savedViewportHeight);
+    mod->setSavedValue<double>("menu-layout-scale", g_savedLayoutScale);
+    mod->setSavedValue<int>("menu-grid-columns", g_savedColumnsPerRow);
 
     for (auto& [title, ws] : g_win) {
         mod->setSavedValue<bool>("collapsed-" + title, ws.collapsed);
+        auto xKey = "pos-" + title + "-x";
+        auto yKey = "pos-" + title + "-y";
         if (ws.hasPos) {
-            mod->setSavedValue<double>("pos-" + title + "-x", ws.pos.x);
-            mod->setSavedValue<double>("pos-" + title + "-y", ws.pos.y);
+            mod->setSavedValue<double>(xKey, ws.pos.x);
+            mod->setSavedValue<double>(yKey, ws.pos.y);
+        } else {
+            mod->setSavedValue<double>(xKey, -1.0);
+            mod->setSavedValue<double>(yKey, -1.0);
         }
     }
 }
@@ -112,6 +139,13 @@ void saveConfig() {
 void loadConfig() {
     auto* mod = Mod::get();
     auto& s = cat::state();
+
+    int savedLayoutVersion = mod->getSavedValue<int>("menu-layout-version", 0);
+    g_resetWindowPositions = savedLayoutVersion != kMenuLayoutVersion;
+    g_savedViewportWidth = static_cast<float>(mod->getSavedValue<double>("menu-viewport-width", 0.0));
+    g_savedViewportHeight = static_cast<float>(mod->getSavedValue<double>("menu-viewport-height", 0.0));
+    g_savedLayoutScale = static_cast<float>(mod->getSavedValue<double>("menu-layout-scale", 0.0));
+    g_savedColumnsPerRow = mod->getSavedValue<int>("menu-grid-columns", 0);
 
     for (auto& w : cat::layout()) {
         for (auto& e : w.entries) {
@@ -122,11 +156,13 @@ void loadConfig() {
         auto& ws = g_win[title];
         ws.collapsed = mod->getSavedValue<bool>("collapsed-" + title, false);
         ws.openT = ws.collapsed ? 0.f : 1.f;
-        double x = mod->getSavedValue<double>("pos-" + title + "-x", -1.0);
-        double y = mod->getSavedValue<double>("pos-" + title + "-y", -1.0);
-        if (x >= 0.0 && y >= 0.0) {
-            ws.pos = ImVec2(static_cast<float>(x), static_cast<float>(y));
-            ws.hasPos = true;
+        if (!g_resetWindowPositions) {
+            double x = mod->getSavedValue<double>("pos-" + title + "-x", -1.0);
+            double y = mod->getSavedValue<double>("pos-" + title + "-y", -1.0);
+            if (x >= 0.0 && y >= 0.0) {
+                ws.pos = ImVec2(static_cast<float>(x), static_cast<float>(y));
+                ws.hasPos = true;
+            }
         }
     }
 
@@ -307,16 +343,14 @@ void extraRow(cat::Extra extra) {
     ImGui::PopItemWidth();
 }
 
-void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH) {
+void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH, float maxHeight) {
     auto& ws = g_win[w.title];
     if (!ws.hasPos) {
         ws.pos = defPos;
         ws.hasPos = true;
     }
 
-    float openH = rowH * (1.f + static_cast<float>(w.entries.size()) + (w.extra != cat::Extra::None ? 1.f : 0.f)) + 2.f;
-    float height = rowH + (openH - rowH) * ws.openT;
-
+    float height = windowHeight(w, ws, rowH, maxHeight);
     ImGui::SetNextWindowPos(ws.pos, ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
 
@@ -341,12 +375,15 @@ void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH) {
     titleBar(w, ws, enabled);
 
     if (ws.openT > 0.001f) {
-        extraRow(w.extra);
-        for (auto& e : w.entries) {
-            bool pressed = toggleRow(e, w.centered);
-            // the fps toggle needs to apply immediately
-            if (pressed && e.ptr == &cat::state().fpsEnabled) applyFps();
+        if (ImGui::BeginChild("##content", ImVec2(0.f, 0.f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground)) {
+            extraRow(w.extra);
+            for (auto& e : w.entries) {
+                bool pressed = toggleRow(e, w.centered);
+                // the fps toggle needs to apply immediately
+                if (pressed && e.ptr == &cat::state().fpsEnabled) applyFps();
+            }
         }
+        ImGui::EndChild();
     }
     ImGui::End();
 }
@@ -359,6 +396,21 @@ void drawFrame() {
     }
 
     ImGuiIO& io = ImGui::GetIO();
+    bool viewportChanged = g_savedViewportWidth <= 0.f || g_savedViewportHeight <= 0.f ||
+        std::abs(g_savedViewportWidth - io.DisplaySize.x) > 1.f ||
+        std::abs(g_savedViewportHeight - io.DisplaySize.y) > 1.f;
+    bool scaleChanged = g_savedLayoutScale <= 0.f || std::abs(g_savedLayoutScale - g_scale) > 0.001f;
+    if (g_resetWindowPositions || viewportChanged || scaleChanged) {
+        for (auto& w : cat::layout()) {
+            g_win[w.title].hasPos = false;
+        }
+        g_savedViewportWidth = io.DisplaySize.x;
+        g_savedViewportHeight = io.DisplaySize.y;
+        g_savedLayoutScale = g_scale;
+        g_resetWindowPositions = false;
+        saveConfig();
+    }
+
     g_fade = approach(g_fade, g_open ? 1.f : 0.f, io.DeltaTime, kFadeAnim);
     if (g_fade <= 0.f && !g_open) return;
 
@@ -368,24 +420,85 @@ void drawFrame() {
     io.FontGlobalScale = g_scale;
 #endif
 
-    // size everything from the font so it follows the interface scale
     float rowH = rowHeight();
-    float width = std::floor(ImGui::GetFontSize() * 15.f);
-    float colGap = 4.f;
-    float stackGap = 2.f;
-    float colY[16] = {};
+    constexpr float margin = 4.f;
+    constexpr float colGap = 4.f;
+    constexpr float stackGap = 2.f;
+    constexpr float rowGap = 4.f;
+    constexpr int kMaxColumns = 16;
+
+    int columnWindows[kMaxColumns] = {};
+    int logicalColumnCount = 0;
+    for (auto& w : cat::layout()) {
+        int col = std::clamp(w.column, 0, kMaxColumns - 1);
+        ++columnWindows[col];
+        logicalColumnCount = std::max(logicalColumnCount, col + 1);
+    }
+    if (logicalColumnCount == 0) return;
+
+    float availableW = std::max(1.f, io.DisplaySize.x - 2.f * margin);
+    float desiredWidth = std::max(130.f, std::floor(ImGui::GetFontSize() * 14.f));
+    int columnsPerRow = std::clamp(
+        static_cast<int>((availableW + colGap) / (desiredWidth + colGap)),
+        1,
+        logicalColumnCount
+    );
+    if (g_savedColumnsPerRow != columnsPerRow) {
+        for (auto& w : cat::layout()) {
+            g_win[w.title].hasPos = false;
+        }
+        g_savedColumnsPerRow = columnsPerRow;
+        saveConfig();
+    }
+    float width = std::min(
+        desiredWidth,
+        (availableW - colGap * static_cast<float>(columnsPerRow - 1)) / static_cast<float>(columnsPerRow)
+    );
+
+    int rowCount = (logicalColumnCount + columnsPerRow - 1) / columnsPerRow;
+    float availableH = std::max(rowH + 2.f, io.DisplaySize.y - 2.f * margin);
+    float rowBudget = std::max(
+        rowH + 2.f,
+        (availableH - rowGap * static_cast<float>(rowCount - 1)) / static_cast<float>(rowCount)
+    );
+
+    float rowStartX[kMaxColumns] = {};
+    for (int row = 0; row < rowCount; ++row) {
+        int rowColumns = std::min(columnsPerRow, logicalColumnCount - row * columnsPerRow);
+        float gridWidth = width * static_cast<float>(rowColumns) + colGap * static_cast<float>(rowColumns - 1);
+        rowStartX[row] = margin + std::max(0.f, (availableW - gridWidth) * 0.5f);
+    }
+
+    float colY[kMaxColumns] = {};
+    int colWindowsRemaining[kMaxColumns] = {};
+    for (int col = 0; col < logicalColumnCount; ++col) {
+        colWindowsRemaining[col] = columnWindows[col];
+    }
 
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, std::max(ease(g_fade), 0.01f));
 
     for (auto& w : cat::layout()) {
-        int rows = static_cast<int>(w.entries.size()) + (w.extra != cat::Extra::None ? 1 : 0);
-        float height = rowH * static_cast<float>(rows + 1) + 2.f;
-        int col = std::clamp(w.column, 0, 15);
+        int col = std::clamp(w.column, 0, kMaxColumns - 1);
+        int gridRow = col / columnsPerRow;
+        int gridColumn = col % columnsPerRow;
+        auto& ws = g_win[w.title];
+        int windowsRemaining = std::max(1, colWindowsRemaining[col]);
+        float remainingHeight = rowBudget - colY[col] - stackGap * static_cast<float>(windowsRemaining - 1);
+        float maxHeight = std::max(rowH + 2.f, remainingHeight / static_cast<float>(windowsRemaining));
+        ImVec2 defPos(
+            rowStartX[gridRow] + static_cast<float>(gridColumn) * (width + colGap),
+            margin + static_cast<float>(gridRow) * (rowBudget + rowGap) + colY[col]
+        );
 
-        ImVec2 defPos(colGap + static_cast<float>(col) * (width + colGap), colGap + colY[col]);
-        colY[col] += height + stackGap;
-
-        drawWindow(w, defPos, width, rowH);
+        if (ws.hasPos && (ws.pos.x < 0.f || ws.pos.y < 0.f ||
+            ws.pos.x + width > io.DisplaySize.x || ws.pos.y + maxHeight > io.DisplaySize.y)) {
+            ws.hasPos = false;
+        }
+        float height = windowHeight(w, ws, rowH, maxHeight);
+        colY[col] += height;
+        if (windowsRemaining > 1) colY[col] += stackGap;
+        --colWindowsRemaining[col];
+        drawWindow(w, defPos, width, rowH, maxHeight);
     }
 
     ImGui::PopStyleVar();
