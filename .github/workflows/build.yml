@@ -42,6 +42,35 @@ jobs:
           combine: true
           target: ${{ matrix.config.target }}
 
+      # If the SDK build fails, rerun its Ninja build so the useful compiler
+      # diagnostics can be surfaced as GitHub annotations as well as raw logs.
+      - name: Capture build diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          if [ -d build ]; then
+            cmake --build build --config Release --verbose --parallel 2>&1 | tee build-diagnostics.log
+            build_status=${PIPESTATUS[0]}
+          else
+            echo "No build directory was generated; the failure happened during CMake configuration." | tee build-diagnostics.log
+            build_status=1
+          fi
+          grep -Ei 'error:|fatal error:|CMake Error|FAILED:|undefined reference|ld: error' build-diagnostics.log | tail -n 80 | while IFS= read -r line; do
+            echo "::error title=Build diagnostic::$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "Diagnostic build exit code: $build_status" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics-${{ matrix.config.name }}
+          path: build-diagnostics.log
+          if-no-files-found: warn
+
   package:
     name: Package builds
     runs-on: ubuntu-latest
