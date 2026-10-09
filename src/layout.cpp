@@ -113,9 +113,14 @@ std::vector<Window> const& layout() {
             }},
 
             // ---- column 8
-            {"Display", 8, Extra::Fps, false, {
-                {"FPS/HZ Bypass", &s.fpsEnabled, "unlock-fps",
-                 "Sets a custom refresh target. Match your monitor when possible; very high rates can affect physics and collision timing. The target is capped at 360 Hz."},
+            {"Display", 8, Extra::Display, false, {
+                {"Unlock FPS", &s.fpsEnabled, "unlock-fps",
+                 "Uses the editable FPS target above for rendering. FPS and Physics TPS are separate settings; rates above 360 can affect performance and gameplay timing."},
+                {"Physics TPS", cat::kPhysicsTpsSupported ? &s.physicsTpsEnabled : nullptr,
+                 "physics-tps-enabled",
+                 cat::kPhysicsTpsSupported
+                    ? "Sets a separate physics tick target. The effective rate is the higher of render FPS and Physics TPS. High rates can change collisions and do not reproduce 2.1 physics."
+                    : "The independent Physics TPS hook is unavailable on macOS. FPS targeting still works."},
                 {"Frame Extrapolation"}, {"Vertical Sync"}, {"Lock Delta"},
                 {"Borderless Classic"}, {"Fullscreen"},
             }},

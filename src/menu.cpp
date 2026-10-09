@@ -29,9 +29,11 @@ constexpr ImU32 kBlack = IM_COL32(0, 0, 0, 255);
 constexpr float kRowAnim = 0.18f;
 constexpr float kCollapseAnim = 0.20f;
 constexpr float kFadeAnim = 0.14f;
-constexpr int kMenuLayoutVersion = 4;
-constexpr float kMinFps = 30.f;
-constexpr float kMaxFps = 360.f;
+constexpr int kMenuLayoutVersion = 5;
+constexpr int kMinRate = 1;
+constexpr int kMaxRate = 1000;
+constexpr int kFpsWarningThreshold = 360;
+constexpr int kPhysicsWarningThreshold = 240;
 
 // ---------------------------------------------------------------- state
 struct WinState {
@@ -109,8 +111,12 @@ std::string fitText(const char* text, float maxWidth, bool& wasTruncated) {
     return "";
 }
 
+int extraRowCount(cat::Extra extra) {
+    return extra == cat::Extra::Display ? 2 : (extra == cat::Extra::None ? 0 : 1);
+}
+
 float windowExpandedHeight(cat::Window const& w, float rowH) {
-    int bodyRows = static_cast<int>(w.entries.size()) + (w.extra != cat::Extra::None ? 1 : 0);
+    int bodyRows = static_cast<int>(w.entries.size()) + extraRowCount(w.extra);
     return rowH * static_cast<float>(bodyRows + 1) + 2.f;
 }
 
@@ -118,6 +124,11 @@ float windowHeight(cat::Window const& w, WinState const& ws, float rowH, float m
     maxHeight = std::max(maxHeight, rowH + 2.f);
     float openHeight = std::max(rowH + 2.f, std::min(windowExpandedHeight(w, rowH), maxHeight));
     return rowH + (openHeight - rowH) * ws.openT;
+}
+
+float sanitizeRate(double value, float fallback) {
+    if (!std::isfinite(value)) return fallback;
+    return static_cast<float>(std::clamp(value, static_cast<double>(kMinRate), static_cast<double>(kMaxRate)));
 }
 
 // ---------------------------------------------------------------- config
@@ -132,6 +143,10 @@ void saveConfig() {
     }
     mod->setSavedValue<double>("speed", s.speed);
     mod->setSavedValue<double>("fps", s.fps);
+    mod->setSavedValue<double>("physics-tps", s.physicsTps);
+    if constexpr (cat::kPhysicsTpsSupported) {
+        mod->setSavedValue<bool>("physics-tps-enabled", s.physicsTpsEnabled);
+    }
     mod->setSavedValue<double>("interface-scale", s.interfaceScale);
     mod->setSavedValue<int>("menu-layout-version", kMenuLayoutVersion);
     mod->setSavedValue<double>("menu-viewport-width", g_savedViewportWidth);
@@ -186,11 +201,13 @@ void loadConfig() {
     }
 
     s.speed = static_cast<float>(mod->getSavedValue<double>("speed", s.speed));
-    s.fps = std::clamp(
-        static_cast<float>(mod->getSavedValue<double>("fps", s.fps)),
-        kMinFps,
-        kMaxFps
-    );
+    s.fps = sanitizeRate(mod->getSavedValue<double>("fps", s.fps), s.fps);
+    s.physicsTps = sanitizeRate(mod->getSavedValue<double>("physics-tps", s.physicsTps), s.physicsTps);
+    if constexpr (cat::kPhysicsTpsSupported) {
+        s.physicsTpsEnabled = mod->getSavedValue<bool>("physics-tps-enabled", s.physicsTpsEnabled);
+    } else {
+        s.physicsTpsEnabled = false;
+    }
     if (savedLayoutVersion < kMenuLayoutVersion) {
         // The previous default was oversized; start the compact layout at a
         // smaller scale once, then preserve the user's future slider choice.
@@ -207,12 +224,9 @@ void loadConfig() {
 
 void applyFps() {
     auto& s = cat::state();
-    if (s.fpsEnabled) {
-        s.fps = std::clamp(s.fps, kMinFps, kMaxFps);
-        CCApplication::sharedApplication()->setAnimationInterval(1.0 / static_cast<double>(s.fps));
-    } else {
-        CCApplication::sharedApplication()->setAnimationInterval(1.0 / 60.0);
-    }
+    s.fps = sanitizeRate(s.fps, 240.f);
+    double targetFps = s.fpsEnabled ? static_cast<double>(s.fps) : 60.0;
+    CCApplication::sharedApplication()->setAnimationInterval(1.0 / targetFps);
 }
 
 void setOpen(bool open) {
@@ -363,6 +377,32 @@ bool toggleRow(cat::Entry const& e, bool centered) {
     return pressed;
 }
 
+void rateInputRow(const char* label, const char* id, float& rate, int warningThreshold, bool warnOnNonDefault, const char* warningText, const char* tooltip, bool applyRenderTarget) {
+    int value = static_cast<int>(std::lround(rate));
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(0.f, 4.f);
+    ImGui::SetNextItemWidth(-1.f);
+    bool changed = ImGui::InputInt(id, &value, 0, 0, ImGuiInputTextFlags_CharsDecimal);
+
+    if (changed && value >= kMinRate && value <= kMaxRate) {
+        rate = static_cast<float>(value);
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        rate = static_cast<float>(std::clamp(value, kMinRate, kMaxRate));
+        if (applyRenderTarget && cat::state().fpsEnabled) applyFps();
+        saveConfig();
+    }
+    if (ImGui::IsItemHovered() && ImGui::GetCurrentContext()->HoveredIdTimer > 0.45f) {
+        ImGui::BeginTooltip();
+        bool isNonDefault = static_cast<int>(std::lround(rate)) != warningThreshold;
+        if (warnOnNonDefault ? isNonDefault : rate > static_cast<float>(warningThreshold)) {
+            ImGui::TextUnformatted(warningText);
+        }
+        ImGui::TextUnformatted(tooltip);
+        ImGui::EndTooltip();
+    }
+}
+
 void extraRow(cat::Extra extra) {
     if (extra == cat::Extra::None) return;
     auto& s = cat::state();
@@ -382,20 +422,28 @@ void extraRow(cat::Extra extra) {
             s.speed = v;
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) saveConfig();
-    } else if (extra == cat::Extra::Fps) {
-        float v = s.fps;
-        if (ImGui::SliderFloat("##fps", &v, kMinFps, kMaxFps, "Target %.0f Hz")) {
-            s.fps = std::clamp(v, kMinFps, kMaxFps);
-        }
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-            if (s.fpsEnabled) applyFps();
-            saveConfig();
-        }
+    } else if (extra == cat::Extra::Display) {
+        rateInputRow(
+            "FPS", "##fps-input", s.fps, kFpsWarningThreshold, false,
+            "Warning: rates above 360 may affect performance and gameplay timing.",
+            "Render FPS only. Values above 360 can affect performance and gameplay timing; the input is limited to 1–1000.",
+            true
+        );
+#if defined(GEODE_IS_MACOS)
+        ImGui::TextUnformatted("TPS bypass unavailable");
         if (ImGui::IsItemHovered() && ImGui::GetCurrentContext()->HoveredIdTimer > 0.45f) {
             ImGui::BeginTooltip();
-            ImGui::TextUnformatted("Match your monitor's refresh rate when possible. Above 240 Hz, physics or collision timing may feel different; lower the target if gameplay seems off. Maximum: 360 Hz.");
+            ImGui::TextUnformatted("The GD 2.2081 macOS build does not expose a reliable hook for its modified physics delta, so independent Physics TPS is unavailable there. FPS targeting remains available.");
             ImGui::EndTooltip();
         }
+#else
+        rateInputRow(
+            "Physics TPS", "##physics-tps-input", s.physicsTps, kPhysicsWarningThreshold, true,
+            "Warning: any value other than 240 Hz can change gameplay physics and collision timing.",
+            "Physics Ticks (Hz) is independent of render FPS. The effective target uses whichever is higher. High rates can change collision/gameplay physics and do not reproduce 2.1 physics; the input is limited to 1–1000.",
+            false
+        );
+#endif
     }
     ImGui::PopItemWidth();
 }
@@ -436,8 +484,12 @@ void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH, fl
             extraRow(w.extra);
             for (auto& e : w.entries) {
                 bool pressed = toggleRow(e, w.centered);
-                // the fps toggle needs to apply immediately
+                // The FPS toggle applies on the same frame. Remember physics
+                // bypass use even if it is turned back off before completion.
                 if (pressed && e.ptr == &cat::state().fpsEnabled) applyFps();
+                if (pressed && e.ptr == &cat::state().physicsTpsEnabled && cat::state().physicsTpsEnabled) {
+                    cat::state().cheated = true;
+                }
             }
         }
         ImGui::EndChild();

@@ -16,8 +16,15 @@ position and your settings.
 | Cosmetic | No Death Effect | |
 | Level | Noclip | respects anticheat spike |
 | Cheat Safety | Safe Mode, Auto Safe Mode | sets `m_isTestMode` on completion so the run isn't saved |
-| Display | FPS/HZ Bypass | `CCApplication::setAnimationInterval`, capped at 360 Hz |
+| Display | Unlock FPS, Physics TPS | Separate numeric render-FPS and physics-tick targets (1–1000); Physics TPS uses GD 2.2 fixed-step timing and is unavailable on macOS |
 | CatHack | Interface Scale | ImGui font scale |
+
+The Display panel has editable numeric FPS and Physics TPS fields, each guarded
+at 1–1000. Physics TPS changes the simulation step separately from rendering;
+when enabled, the effective tick target is the higher of the requested FPS and
+Physics TPS. Rates outside normal gameplay ranges can change collision behavior,
+and this does not reproduce Geometry Dash 2.1 physics. Auto Safe Mode treats an
+enabled Physics TPS bypass as a cheated run.
 
 Every other row is a dimmed placeholder with a "Not implemented yet" tooltip.
 The menu is organized into MegaHack-style panels, including Bypass, Level,
