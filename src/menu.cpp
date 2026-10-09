@@ -9,6 +9,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 
@@ -28,7 +29,7 @@ constexpr ImU32 kBlack = IM_COL32(0, 0, 0, 255);
 constexpr float kRowAnim = 0.18f;
 constexpr float kCollapseAnim = 0.20f;
 constexpr float kFadeAnim = 0.14f;
-constexpr int kMenuLayoutVersion = 2;
+constexpr int kMenuLayoutVersion = 3;
 
 // ---------------------------------------------------------------- state
 struct WinState {
@@ -40,7 +41,7 @@ struct WinState {
 
 bool g_open = false;
 float g_fade = 0.f;
-float g_scale = 1.2f; // applied scale (only updated after you let go of the slider)
+float g_scale = 0.8f; // applied scale (only updated after you let go of the slider)
 float g_savedViewportWidth = 0.f;
 float g_savedViewportHeight = 0.f;
 float g_savedLayoutScale = 0.f;
@@ -90,6 +91,19 @@ float animated(ImGuiID id, float target, float dt, float duration) {
 
 float rowHeight() {
     return std::floor(ImGui::GetFontSize() + ImGui::GetStyle().FramePadding.y * 2.f + 0.5f);
+}
+
+std::string fitText(const char* text, float maxWidth, bool& wasTruncated) {
+    std::string fitted = text ? text : "";
+    if (ImGui::CalcTextSize(fitted.c_str()).x <= maxWidth) return fitted;
+
+    wasTruncated = true;
+    while (!fitted.empty()) {
+        fitted.pop_back();
+        std::string candidate = fitted + "...";
+        if (ImGui::CalcTextSize(candidate.c_str()).x <= maxWidth) return candidate;
+    }
+    return "";
 }
 
 float windowExpandedHeight(cat::Window const& w, float rowH) {
@@ -168,7 +182,17 @@ void loadConfig() {
 
     s.speed = static_cast<float>(mod->getSavedValue<double>("speed", s.speed));
     s.fps = static_cast<float>(mod->getSavedValue<double>("fps", s.fps));
-    s.interfaceScale = static_cast<float>(mod->getSavedValue<double>("interface-scale", s.interfaceScale));
+    if (savedLayoutVersion < kMenuLayoutVersion) {
+        // The previous default was oversized; start the compact layout at a
+        // smaller scale once, then preserve the user's future slider choice.
+        s.interfaceScale = 0.8f;
+    } else {
+        s.interfaceScale = std::clamp(
+            static_cast<float>(mod->getSavedValue<double>("interface-scale", s.interfaceScale)),
+            0.65f,
+            1.5f
+        );
+    }
     g_scale = s.interfaceScale;
 }
 
@@ -187,13 +211,26 @@ void setOpen(bool open) {
 }
 
 void applyTheme() {
+    ImGuiIO& io = ImGui::GetIO();
+    auto fontPath = Mod::get()->getResourcesDir() / "fonts" / "DejaVuSans.ttf";
+    if (std::filesystem::exists(fontPath)) {
+        ImFont* font = io.Fonts->AddFontFromFileTTF(fontPath.string().c_str(), 14.f);
+        if (font) {
+            io.FontDefault = font;
+        } else {
+            log::warn("Could not load the bundled DejaVu Sans font; keeping ImGui's fallback font.");
+        }
+    } else {
+        log::warn("Bundled DejaVu Sans font is missing; keeping ImGui's fallback font.");
+    }
+
     ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 4.f;
+    style.WindowRounding = 3.f;
     style.WindowBorderSize = 0.f;
     style.WindowPadding = ImVec2(0.f, 0.f);
-    style.FramePadding = ImVec2(6.f, 3.f);
+    style.FramePadding = ImVec2(4.f, 1.f);
     style.ItemSpacing = ImVec2(0.f, 0.f);
-    style.ScrollbarSize = 8.f;
+    style.ScrollbarSize = 6.f;
 
     ImVec4* c = style.Colors;
     c[ImGuiCol_WindowBg] = ImVec4(0.08f, 0.08f, 0.08f, 0.94f);
@@ -225,7 +262,7 @@ void titleBar(cat::Window const& w, WinState& ws, int enabled) {
 
     // +/- button
     float btn = h * 0.55f;
-    ImVec2 bMin(p.x + 4.f, p.y + (h - btn) * 0.5f);
+    ImVec2 bMin(p.x + 3.f, p.y + (h - btn) * 0.5f);
     ImVec2 bMax(bMin.x + btn, bMin.y + btn);
     float t = ws.openT;
     ImU32 btnCol = withAlpha(kWhite);
@@ -245,7 +282,7 @@ void titleBar(cat::Window const& w, WinState& ws, int enabled) {
         std::snprintf(titleBuf, sizeof(titleBuf), "%s", w.title);
     }
     ImVec2 ts = ImGui::CalcTextSize(titleBuf);
-    dl->AddText(ImVec2(p.x + btn + 8.f, p.y + (h - ts.y) * 0.5f), withAlpha(kWhite), titleBuf);
+    dl->AddText(ImVec2(p.x + btn + 6.f, p.y + (h - ts.y) * 0.5f), withAlpha(kWhite), titleBuf);
 
     ImGui::InvisibleButton(("##title-" + std::string(w.title)).c_str(), size);
     if (ImGui::IsItemClicked() || ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
@@ -289,22 +326,26 @@ bool toggleRow(cat::Entry const& e, bool centered) {
     dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), bg);
 
     // right track bar
-    float trackW = 3.f;
+    float trackW = 2.f;
     ImU32 trackCol = mix(withAlpha(kTrack), withAlpha(kPink), enT);
     dl->AddRectFilled(ImVec2(p.x + size.x - trackW, p.y), ImVec2(p.x + size.x, p.y + size.y), trackCol);
 
     ImU32 textCol = implemented ? mix(withAlpha(kText), withAlpha(kPink), enT * 0.6f) : withAlpha(kDim);
-    ImVec2 ts = ImGui::CalcTextSize(e.label);
-    float tx = centered ? p.x + (size.x - ts.x) * 0.5f : p.x + 8.f;
-    dl->AddText(ImVec2(tx, p.y + (h - ts.y) * 0.5f), textCol, e.label);
+    constexpr float textPad = 6.f;
+    float textMaxWidth = std::max(1.f, size.x - trackW - textPad * 2.f);
+    bool labelTruncated = false;
+    std::string displayLabel = fitText(e.label, textMaxWidth, labelTruncated);
+    ImVec2 ts = ImGui::CalcTextSize(displayLabel.c_str());
+    float tx = centered ? p.x + (size.x - trackW - ts.x) * 0.5f : p.x + textPad;
+    dl->AddText(ImVec2(tx, p.y + (h - ts.y) * 0.5f), textCol, displayLabel.c_str());
 
-    if (hovered && e.desc && ImGui::GetCurrentContext()->HoveredIdTimer > 0.45f) {
+    float hoverTime = ImGui::GetCurrentContext()->HoveredIdTimer;
+    bool showTooltip = hovered && (!implemented || ((e.desc || labelTruncated) && hoverTime > 0.45f));
+    if (showTooltip) {
         ImGui::BeginTooltip();
-        ImGui::TextUnformatted(e.desc);
-        ImGui::EndTooltip();
-    } else if (hovered && !implemented) {
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted("Not implemented yet");
+        if (labelTruncated) ImGui::TextUnformatted(e.label);
+        if (e.desc) ImGui::TextUnformatted(e.desc);
+        else if (!implemented) ImGui::TextUnformatted("Not implemented yet");
         ImGui::EndTooltip();
     }
 
@@ -317,7 +358,7 @@ void extraRow(cat::Extra extra) {
     ImGui::PushItemWidth(-1);
     if (extra == cat::Extra::Scale) {
         float v = s.interfaceScale;
-        if (ImGui::SliderFloat("##scale", &v, 0.7f, 2.0f, "Scale %.2f")) {
+        if (ImGui::SliderFloat("##scale", &v, 0.65f, 1.5f, "Scale %.2f")) {
             s.interfaceScale = v;
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
@@ -437,7 +478,7 @@ void drawFrame() {
     if (logicalColumnCount == 0) return;
 
     float availableW = std::max(1.f, io.DisplaySize.x - 2.f * margin);
-    float desiredWidth = std::max(130.f, std::floor(ImGui::GetFontSize() * 14.f));
+    float desiredWidth = std::max(124.f, std::floor(ImGui::GetFontSize() * 12.f));
     int columnsPerRow = std::clamp(
         static_cast<int>((availableW + colGap) / (desiredWidth + colGap)),
         1,
@@ -511,8 +552,8 @@ $on_mod(Loaded) {
 
     ImGuiCocos::get()
         .setup([] {
-            // imgui gets re-initialised (e.g. when toggling fullscreen), so the
-            // theme is applied here. Load a custom font here too if you want.
+            // Reapply the theme and bundled font whenever ImGui's context is
+            // initialized or reloaded (for example, after toggling fullscreen).
             applyTheme();
         })
         .draw([] {

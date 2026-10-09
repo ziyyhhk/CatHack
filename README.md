@@ -41,6 +41,9 @@ Customiser, Slider Limit, Treasure Room, Unlock Shops and Unlock Vaults.
 - Panels automatically wrap into additional rows to fit the game viewport;
   oversized panels get an inner scrollbar, and saved positions reset when the
   viewport or interface scale changes.
+- A compact default scale, tighter row spacing, and the bundled DejaVu Sans font
+  replace ImGui's pixel-style default; long labels truncate cleanly and show in
+  their tooltip.
 - Animation lengths and colors are constants at the top of `src/menu.cpp`.
 
 ## Adding a hack

@@ -16,7 +16,7 @@ struct State {
 
     float speed = 1.f;
     float fps = 240.f;
-    float interfaceScale = 1.2f;
+    float interfaceScale = 0.8f;
 
     // runtime only (not saved): true once a cheat touched the current level
     bool cheated = false;
