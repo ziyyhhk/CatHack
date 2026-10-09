@@ -359,10 +359,6 @@ void drawFrame() {
     }
 
     ImGuiIO& io = ImGui::GetIO();
-    if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
-        setOpen(!g_open);
-    }
-
     g_fade = approach(g_fade, g_open ? 1.f : 0.f, io.DeltaTime, kFadeAnim);
     if (g_fade <= 0.f && !g_open) return;
 
@@ -409,4 +405,23 @@ $on_mod(Loaded) {
         .draw([] {
             drawFrame();
         });
+}
+
+// ImGui only receives keys while it wants to capture keyboard input. That
+// means a Tab press can't open a closed menu from inside drawFrame; listen to
+// Geode's global keyboard event so the hotkey works in both states.
+$execute {
+    KeyboardInputEvent().listen([](KeyboardInputData& event) {
+        if (event.key != KEY_Tab || event.action != KeyboardInputData::Action::Press) {
+            return ListenerResult::Propagate;
+        }
+
+        auto& imgui = ImGuiCocos::get();
+        if (imgui.isInitialized() && ImGui::GetIO().WantTextInput) {
+            return ListenerResult::Propagate;
+        }
+
+        setOpen(!g_open);
+        return ListenerResult::Stop;
+    }).leak();
 }
