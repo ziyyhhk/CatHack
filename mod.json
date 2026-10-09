@@ -10,5 +10,10 @@
 	"name": "CatHack Menu",
 	"version": "v0.1.0",
 	"developer": "Akira",
-	"description": "Mega Hack style mod menu for Geometry Dash 2.2081. Press Tab to open."
+	"description": "Mega Hack style mod menu for Geometry Dash 2.2081. Press Tab to open.",
+	"resources": {
+		"folders": [
+			"resources/fonts"
+		]
+	}
 }
