@@ -25,6 +25,22 @@ add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 # Geode-compatible ImGui backend (pinned for reproducible CI builds).
 # Update only after checking the backend against the target Geode/GD bindings.
 CPMAddPackage("gh:matcool/gd-imgui-cocos#b93f08ccef778a53ebba09b20c347f6a63980119")
+
+# GD 2.2081 routes iOS keyboard input through Geode events; its bindings do not
+# provide the CCKeyboardDispatcher modify header. The backend only uses that
+# hook on older GD builds and macOS, so keep its include out of iOS builds.
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(_imgui_cocos_hooks "${gd-imgui-cocos_SOURCE_DIR}/src/hooks.cpp")
+    file(READ "${_imgui_cocos_hooks}" _imgui_cocos_hooks_source)
+    string(REPLACE
+        "#include <Geode/modify/CCKeyboardDispatcher.hpp>"
+        "#ifndef GEODE_IS_IOS\n#include <Geode/modify/CCKeyboardDispatcher.hpp>\n#endif"
+        _imgui_cocos_hooks_source
+        "${_imgui_cocos_hooks_source}"
+    )
+    file(WRITE "${_imgui_cocos_hooks}" "${_imgui_cocos_hooks_source}")
+endif()
+
 target_link_libraries(${PROJECT_NAME} imgui-cocos)
 
 setup_geode_mod(${PROJECT_NAME})
