@@ -20,9 +20,11 @@ position and your settings.
 | CatHack | Interface Scale | ImGui font scale |
 
 Every other row is a dimmed placeholder with a "Not implemented yet" tooltip.
-In the Bypass window the placeholders are Anti-Kick, Challenge Level, Keymaster,
-Main Levels, Music Customiser, Slider Limit, Treasure Room, Unlock Shops and
-Unlock Vaults.
+The menu is organized into MegaHack-style panels, including Bypass, Level,
+Status, and Replay. The Level and Replay panels are currently UI scaffolding;
+only the explicitly implemented toggles are active. In the Bypass window the
+placeholders are Anti-Kick, Challenge Level, Keymaster, Main Levels, Music
+Customiser, Slider Limit, Treasure Room, Unlock Shops and Unlock Vaults.
 
 ## UI
 
