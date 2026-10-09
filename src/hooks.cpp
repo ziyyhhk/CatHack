@@ -27,7 +27,8 @@ class $modify(CatPlayLayer, PlayLayer) {
 
     void levelComplete() {
         auto& s = cat::state();
-        bool cheating = s.cheated || s.noclip || (s.speedEnabled && s.speed != 1.f) || s.physicsTpsEnabled;
+        bool customPhysicsTps = s.physicsTpsEnabled && s.physicsTps != 240.0;
+        bool cheating = s.cheated || s.noclip || (s.speedEnabled && s.speed != 1.f) || customPhysicsTps;
         // test mode runs are not saved to your stats or submitted
         if (s.safeMode || (s.autoSafeMode && cheating)) {
             m_isTestMode = true;

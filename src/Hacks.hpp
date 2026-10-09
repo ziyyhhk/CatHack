@@ -16,8 +16,8 @@ struct State {
     bool physicsTpsEnabled = false;
 
     float speed = 1.f;
-    float fps = 240.f;
-    float physicsTps = 240.f;
+    double fps = 240.0;
+    double physicsTps = 240.0;
     float interfaceScale = 0.8f;
 
     // runtime only (not saved): true once a cheat touched the current level

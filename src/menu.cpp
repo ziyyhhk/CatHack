@@ -30,10 +30,8 @@ constexpr float kRowAnim = 0.18f;
 constexpr float kCollapseAnim = 0.20f;
 constexpr float kFadeAnim = 0.14f;
 constexpr int kMenuLayoutVersion = 5;
-constexpr int kMinRate = 1;
-constexpr int kMaxRate = 1000;
-constexpr int kFpsWarningThreshold = 360;
-constexpr int kPhysicsWarningThreshold = 240;
+constexpr double kFpsWarningThreshold = 360.0;
+constexpr double kPhysicsWarningThreshold = 240.0;
 
 // ---------------------------------------------------------------- state
 struct WinState {
@@ -47,6 +45,8 @@ struct WinState {
 bool g_open = false;
 float g_fade = 0.f;
 float g_scale = 0.8f; // applied scale (only updated after you let go of the slider)
+double g_lastValidFps = 240.0;
+double g_lastValidPhysicsTps = 240.0;
 float g_savedViewportWidth = 0.f;
 float g_savedViewportHeight = 0.f;
 float g_savedLayoutScale = 0.f;
@@ -126,15 +126,18 @@ float windowHeight(cat::Window const& w, WinState const& ws, float rowH, float m
     return rowH + (openHeight - rowH) * ws.openT;
 }
 
-float sanitizeRate(double value, float fallback) {
-    if (!std::isfinite(value)) return fallback;
-    return static_cast<float>(std::clamp(value, static_cast<double>(kMinRate), static_cast<double>(kMaxRate)));
+double sanitizeRate(double value, double fallback) {
+    return std::isfinite(value) && value > 0.0 ? value : fallback;
 }
 
 // ---------------------------------------------------------------- config
 void saveConfig() {
     auto* mod = Mod::get();
     auto& s = cat::state();
+    s.fps = sanitizeRate(s.fps, g_lastValidFps);
+    s.physicsTps = sanitizeRate(s.physicsTps, g_lastValidPhysicsTps);
+    g_lastValidFps = s.fps;
+    g_lastValidPhysicsTps = s.physicsTps;
 
     for (auto& w : cat::layout()) {
         for (auto& e : w.entries) {
@@ -203,6 +206,8 @@ void loadConfig() {
     s.speed = static_cast<float>(mod->getSavedValue<double>("speed", s.speed));
     s.fps = sanitizeRate(mod->getSavedValue<double>("fps", s.fps), s.fps);
     s.physicsTps = sanitizeRate(mod->getSavedValue<double>("physics-tps", s.physicsTps), s.physicsTps);
+    g_lastValidFps = s.fps;
+    g_lastValidPhysicsTps = s.physicsTps;
     if constexpr (cat::kPhysicsTpsSupported) {
         s.physicsTpsEnabled = mod->getSavedValue<bool>("physics-tps-enabled", s.physicsTpsEnabled);
     } else {
@@ -224,9 +229,11 @@ void loadConfig() {
 
 void applyFps() {
     auto& s = cat::state();
-    s.fps = sanitizeRate(s.fps, 240.f);
-    double targetFps = s.fpsEnabled ? static_cast<double>(s.fps) : 60.0;
-    CCApplication::sharedApplication()->setAnimationInterval(1.0 / targetFps);
+    s.fps = sanitizeRate(s.fps, 240.0);
+    double targetFps = s.fpsEnabled ? s.fps : 60.0;
+    double interval = 1.0 / targetFps;
+    if (!std::isfinite(interval)) interval = DBL_MAX;
+    CCApplication::sharedApplication()->setAnimationInterval(interval);
 }
 
 void setOpen(bool open) {
@@ -377,25 +384,30 @@ bool toggleRow(cat::Entry const& e, bool centered) {
     return pressed;
 }
 
-void rateInputRow(const char* label, const char* id, float& rate, int warningThreshold, bool warnOnNonDefault, const char* warningText, const char* tooltip, bool applyRenderTarget) {
-    int value = static_cast<int>(std::lround(rate));
+void rateInputRow(const char* label, const char* id, double& rate, double& lastValidRate, double warningThreshold, bool warnOnNonDefault, const char* warningText, const char* tooltip, bool applyRenderTarget) {
     ImGui::TextUnformatted(label);
     ImGui::SameLine(0.f, 4.f);
     ImGui::SetNextItemWidth(-1.f);
-    bool changed = ImGui::InputInt(id, &value, 0, 0, ImGuiInputTextFlags_CharsDecimal);
+    ImGui::InputDouble(id, &rate, 0.0, 0.0, "%.15g", ImGuiInputTextFlags_CharsScientific);
 
-    if (changed && value >= kMinRate && value <= kMaxRate) {
-        rate = static_cast<float>(value);
+    const bool invalidRate = !std::isfinite(rate) || rate <= 0.0;
+    if (invalidRate && !ImGui::IsItemActive()) {
+        rate = lastValidRate;
+    } else if (!invalidRate) {
+        lastValidRate = rate;
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) {
-        rate = static_cast<float>(std::clamp(value, kMinRate, kMaxRate));
+        if (invalidRate) rate = lastValidRate > 0.0 ? lastValidRate : 240.0;
+        if (!applyRenderTarget && cat::state().physicsTpsEnabled && rate != 240.0) {
+            cat::state().cheated = true;
+        }
         if (applyRenderTarget && cat::state().fpsEnabled) applyFps();
         saveConfig();
     }
     if (ImGui::IsItemHovered() && ImGui::GetCurrentContext()->HoveredIdTimer > 0.45f) {
         ImGui::BeginTooltip();
-        bool isNonDefault = static_cast<int>(std::lround(rate)) != warningThreshold;
-        if (warnOnNonDefault ? isNonDefault : rate > static_cast<float>(warningThreshold)) {
+        bool isNonDefault = rate != warningThreshold;
+        if (warnOnNonDefault ? isNonDefault : rate > warningThreshold) {
             ImGui::TextUnformatted(warningText);
         }
         ImGui::TextUnformatted(tooltip);
@@ -424,9 +436,9 @@ void extraRow(cat::Extra extra) {
         if (ImGui::IsItemDeactivatedAfterEdit()) saveConfig();
     } else if (extra == cat::Extra::Display) {
         rateInputRow(
-            "FPS", "##fps-input", s.fps, kFpsWarningThreshold, false,
+            "FPS", "##fps-input", s.fps, g_lastValidFps, kFpsWarningThreshold, false,
             "Warning: rates above 360 may affect performance and gameplay timing.",
-            "Render FPS only. Values above 360 can affect performance and gameplay timing; the input is limited to 1–1000.",
+            "Render FPS only. Type any positive finite value. High targets may be limited by your display or system and can affect gameplay timing.",
             true
         );
 #if defined(GEODE_IS_MACOS)
@@ -438,9 +450,9 @@ void extraRow(cat::Extra extra) {
         }
 #else
         rateInputRow(
-            "Physics TPS", "##physics-tps-input", s.physicsTps, kPhysicsWarningThreshold, true,
+            "Physics TPS", "##physics-tps-input", s.physicsTps, g_lastValidPhysicsTps, kPhysicsWarningThreshold, true,
             "Warning: any value other than 240 Hz can change gameplay physics and collision timing.",
-            "Physics Ticks (Hz) is independent of render FPS. The effective target uses whichever is higher. High rates can change collision/gameplay physics and do not reproduce 2.1 physics; the input is limited to 1–1000.",
+            "Physics Ticks Per Second (TPS) is independent of render FPS; the effective target uses whichever is higher. Any TPS other than 240 counts as cheating. Physics rates can change collisions and do not reproduce 2.1 physics. Positive finite values are accepted; a 4096-step-per-render-update safety budget prevents runaway work, so extreme targets may fall behind.",
             false
         );
 #endif
@@ -487,7 +499,8 @@ void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH, fl
                 // The FPS toggle applies on the same frame. Remember physics
                 // bypass use even if it is turned back off before completion.
                 if (pressed && e.ptr == &cat::state().fpsEnabled) applyFps();
-                if (pressed && e.ptr == &cat::state().physicsTpsEnabled && cat::state().physicsTpsEnabled) {
+                if (pressed && e.ptr == &cat::state().physicsTpsEnabled &&
+                    cat::state().physicsTpsEnabled && cat::state().physicsTps != 240.0) {
                     cat::state().cheated = true;
                 }
             }

@@ -14,12 +14,9 @@ using namespace geode::prelude;
 namespace {
 constexpr double kDefaultRenderFps = 60.0;
 constexpr double kDefaultPhysicsTps = 240.0;
-constexpr double kMinRate = 1.0;
-constexpr double kMaxRate = 1000.0;
 
 double boundedRate(double value, double fallback) {
-    if (!std::isfinite(value)) return fallback;
-    return std::clamp(value, kMinRate, kMaxRate);
+    return std::isfinite(value) && value > 0.0 ? value : fallback;
 }
 
 double configuredPhysicsRate(cat::State const& state, float frameDelta) {
@@ -40,7 +37,7 @@ double configuredPhysicsRate(cat::State const& state, float frameDelta) {
     requestedRenderFps = std::max(requestedRenderFps, boundedRate(actualRenderFps, kDefaultRenderFps));
 
     const double requestedPhysicsTps = boundedRate(state.physicsTps, kDefaultPhysicsTps);
-    return std::clamp(std::max(requestedRenderFps, requestedPhysicsTps), kMinRate, kMaxRate);
+    return std::max(requestedRenderFps, requestedPhysicsTps);
 }
 } // namespace
 
@@ -62,7 +59,9 @@ class $modify(CatPhysicsTickRateLayer, GJBaseGameLayer) {
         }
 
         const double targetTps = configuredPhysicsRate(state, frameDelta);
-        if (std::abs(targetTps - kDefaultPhysicsTps) < 1e-6) {
+        if (targetTps != kDefaultPhysicsTps) {
+            state.cheated = true;
+        } else {
             return GJBaseGameLayer::getModifiedDelta(frameDelta);
         }
 

@@ -119,7 +119,7 @@ std::vector<Window> const& layout() {
                 {"Physics TPS", cat::kPhysicsTpsSupported ? &s.physicsTpsEnabled : nullptr,
                  "physics-tps-enabled",
                  cat::kPhysicsTpsSupported
-                    ? "Sets a separate physics tick target. The effective rate is the higher of render FPS and Physics TPS. High rates can change collisions and do not reproduce 2.1 physics."
+                    ? "Sets a separate Physics Ticks Per Second target. Any value other than 240 is considered cheating; high rates can change collisions and do not reproduce 2.1 physics."
                     : "The independent Physics TPS hook is unavailable on macOS. FPS targeting still works."},
                 {"Frame Extrapolation"}, {"Vertical Sync"}, {"Lock Delta"},
                 {"Borderless Classic"}, {"Fullscreen"},
