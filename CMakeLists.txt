@@ -17,9 +17,9 @@ endif()
 
 add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
-# ImGui for Geode. CPM ships with Geode.
-# TODO: replace "main" with a specific commit hash so builds are reproducible.
-CPMAddPackage("gh:matcool/gd-imgui-cocos#main")
+# Geode-compatible ImGui backend (pinned for reproducible CI builds).
+# Update only after checking the backend against the target Geode/GD bindings.
+CPMAddPackage("gh:matcool/gd-imgui-cocos#b93f08ccef778a53ebba09b20c347f6a63980119")
 target_link_libraries(${PROJECT_NAME} imgui-cocos)
 
 setup_geode_mod(${PROJECT_NAME})

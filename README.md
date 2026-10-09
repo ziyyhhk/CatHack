@@ -50,8 +50,8 @@ Customiser, Slider Limit, Treasure Room, Unlock Shops and Unlock Vaults.
 
 ## If the build fails
 
-- `CPMAddPackage("gh:matcool/gd-imgui-cocos#main")` in `CMakeLists.txt` should be
-  pinned to a commit hash.
+- The Geode-compatible `gd-imgui-cocos` revision is pinned in `CMakeLists.txt`;
+  update it only after checking its API and building all intended targets.
 - Hook signatures (`PlayLayer::init`, `onTextFieldInsertText`, ...) and members
   (`m_anticheatSpike`, `m_isTestMode`, `m_maxLabelLength`) come from the Geode
   bindings and can change between game versions. Check them in the bindings repo.
