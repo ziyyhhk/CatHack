@@ -195,7 +195,8 @@ class $modify(CatHackExtrapolatedLayer, GJBaseGameLayer) {
     void visit() {
         auto* manager = GameManager::get();
         auto* playLayer = manager ? manager->m_playLayer : nullptr;
-        if (!playLayer || this != playLayer || !cat::display::settings().frameExtrapolation) {
+        if (!playLayer || static_cast<GJBaseGameLayer*>(this) != static_cast<GJBaseGameLayer*>(playLayer) ||
+            !cat::display::settings().frameExtrapolation) {
             GJBaseGameLayer::visit();
             return;
         }

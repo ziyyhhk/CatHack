@@ -5,6 +5,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <cmath>
 

@@ -106,7 +106,8 @@ class $modify(CatHackTpsBypass, GJBaseGameLayer) {
     void update(float dt) {
         auto* manager = GameManager::get();
         auto* playLayer = manager ? manager->m_playLayer : nullptr;
-        const bool isActivePlayLayer = playLayer && this == playLayer;
+        const bool isActivePlayLayer = playLayer &&
+            static_cast<GJBaseGameLayer*>(this) == static_cast<GJBaseGameLayer*>(playLayer);
 
         if (!isActivePlayLayer) {
             cat::display::tps::resetAccumulator();
