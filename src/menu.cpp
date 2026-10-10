@@ -141,7 +141,9 @@ void saveConfig() {
 
     for (auto& w : cat::layout()) {
         for (auto& e : w.entries) {
-            if (e.ptr && e.id) mod->setSavedValue<bool>(e.id, *e.ptr);
+            if (e.ptr && e.id && e.ptr != &s.verticalSyncEnabled) {
+                mod->setSavedValue<bool>(e.id, *e.ptr);
+            }
         }
     }
     mod->setSavedValue<double>("speed", s.speed);
@@ -149,6 +151,11 @@ void saveConfig() {
     mod->setSavedValue<double>("physics-tps", s.physicsTps);
     if constexpr (cat::kPhysicsTpsSupported) {
         mod->setSavedValue<bool>("physics-tps-enabled", s.physicsTpsEnabled);
+    } else {
+        mod->setSavedValue<bool>("physics-tps-enabled", false);
+    }
+    if (s.verticalSyncPreferenceSaved) {
+        mod->setSavedValue<bool>("vertical-sync", s.verticalSyncEnabled);
     }
     mod->setSavedValue<double>("interface-scale", s.interfaceScale);
     mod->setSavedValue<int>("menu-layout-version", kMenuLayoutVersion);
@@ -213,6 +220,17 @@ void loadConfig() {
     } else {
         s.physicsTpsEnabled = false;
     }
+    bool originalVerticalSync = false;
+#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS) || defined(GEODE_IS_IOS)
+    if (auto* gameManager = GameManager::get()) {
+        originalVerticalSync = gameManager->getGameVariable(GameVar::VerticalSync);
+    }
+#endif
+    s.verticalSyncPreferenceSaved = mod->hasSavedValue("vertical-sync");
+    s.verticalSyncEnabled = s.verticalSyncPreferenceSaved
+        ? mod->getSavedValue<bool>("vertical-sync")
+        : originalVerticalSync;
+    s.displaySettingsLoaded = true;
     if (savedLayoutVersion < kMenuLayoutVersion) {
         // The previous default was oversized; start the compact layout at a
         // smaller scale once, then preserve the user's future slider choice.
@@ -344,6 +362,9 @@ bool toggleRow(cat::Entry const& e, bool centered) {
     bool pressed = false;
     if (implemented && ImGui::IsItemClicked()) {
         *e.ptr = !*e.ptr;
+        if (e.ptr == &cat::state().verticalSyncEnabled) {
+            cat::state().verticalSyncPreferenceSaved = true;
+        }
         pressed = true;
         saveConfig();
     }
@@ -398,7 +419,8 @@ void rateInputRow(const char* label, const char* id, double& rate, double& lastV
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         if (invalidRate) rate = lastValidRate > 0.0 ? lastValidRate : 240.0;
-        if (!applyRenderTarget && cat::state().physicsTpsEnabled && rate != 240.0) {
+        if (!applyRenderTarget && cat::kPhysicsTpsSupported &&
+            cat::state().physicsTpsEnabled && rate != 240.0) {
             cat::state().cheated = true;
         }
         if (applyRenderTarget && cat::state().fpsEnabled) applyFps();
@@ -441,21 +463,12 @@ void extraRow(cat::Extra extra) {
             "Render FPS only. Type any positive finite value. High targets may be limited by your display or system and can affect gameplay timing.",
             true
         );
-#if defined(GEODE_IS_MACOS)
-        ImGui::TextUnformatted("TPS bypass unavailable");
-        if (ImGui::IsItemHovered() && ImGui::GetCurrentContext()->HoveredIdTimer > 0.45f) {
-            ImGui::BeginTooltip();
-            ImGui::TextUnformatted("The GD 2.2081 macOS build does not expose a reliable hook for its modified physics delta, so independent Physics TPS is unavailable there. FPS targeting remains available.");
-            ImGui::EndTooltip();
-        }
-#else
         rateInputRow(
-            "Physics TPS", "##physics-tps-input", s.physicsTps, g_lastValidPhysicsTps, kPhysicsWarningThreshold, true,
-            "Warning: any value other than 240 Hz can change gameplay physics and collision timing.",
-            "Physics Ticks Per Second (TPS) is independent of render FPS; the effective target uses whichever is higher. Any TPS other than 240 counts as cheating. Physics rates can change collisions and do not reproduce 2.1 physics. Positive finite values are accepted; a 4096-step-per-render-update safety budget prevents runaway work, so extreme targets may fall behind.",
+            "TPS (not applied)", "##physics-tps-input", s.physicsTps, g_lastValidPhysicsTps, kPhysicsWarningThreshold, true,
+            "Warning: if enabled by a future verified implementation, any TPS other than 240 counts as cheating and may change collisions. CatHack does not currently apply this target.",
+            "Physics TPS is kept as a separate positive-finite numeric target, but is not applied to simulation: GD 2.2081 bindings expose no verified isolated physics-substep API, and the old modified-delta hook did not schedule extra gameplay updates. Any applied TPS other than 240 counts as cheating; high TPS can alter physics.",
             false
         );
-#endif
     }
     ImGui::PopItemWidth();
 }
@@ -496,10 +509,13 @@ void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH, fl
             extraRow(w.extra);
             for (auto& e : w.entries) {
                 bool pressed = toggleRow(e, w.centered);
-                // The FPS toggle applies on the same frame. Remember physics
-                // bypass use even if it is turned back off before completion.
+                // Keep rendering FPS and native VSync as separate controls.
                 if (pressed && e.ptr == &cat::state().fpsEnabled) applyFps();
-                if (pressed && e.ptr == &cat::state().physicsTpsEnabled &&
+                if (pressed && e.ptr == &cat::state().verticalSyncEnabled) {
+                    cat::applyVerticalSync(cat::state().verticalSyncEnabled);
+                }
+                if (pressed && cat::kPhysicsTpsSupported &&
+                    e.ptr == &cat::state().physicsTpsEnabled &&
                     cat::state().physicsTpsEnabled && cat::state().physicsTps != 240.0) {
                     cat::state().cheated = true;
                 }
@@ -511,6 +527,20 @@ void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH, fl
 }
 
 void drawFrame() {
+#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS) || defined(GEODE_IS_IOS)
+    auto& displayState = cat::state();
+    if (displayState.displaySettingsLoaded && !displayState.verticalSyncInitialized) {
+        // If GameManager did not exist during mod loading, defer the first
+        // native call until its engine-owned preference is available.
+        if (auto* gameManager = GameManager::get()) {
+            cat::initializeVerticalSync(
+                gameManager->getGameVariable(GameVar::VerticalSync),
+                displayState.verticalSyncEnabled
+            );
+        }
+    }
+#endif
+
     static bool first = true;
     if (first) {
         first = false;

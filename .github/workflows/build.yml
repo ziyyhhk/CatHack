@@ -38,7 +38,7 @@ jobs:
       - name: Build the mod
         uses: geode-sdk/build-geode-mod@main
         with:
-          # Use the Geode version declared in mod.json (5.10.1), which is
+          # Use the Geode version declared in mod.json (5.11.0), which is
           # verified against GD 2.2081 instead of drifting with new releases.
           sdk: given
           combine: true

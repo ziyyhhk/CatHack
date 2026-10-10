@@ -115,13 +115,18 @@ std::vector<Window> const& layout() {
             // ---- column 8
             {"Display", 8, Extra::Display, false, {
                 {"Unlock FPS", &s.fpsEnabled, "unlock-fps",
-                 "Uses the editable FPS target above for rendering. FPS and Physics TPS are separate settings; rates above 360 can affect performance and gameplay timing."},
+                 "Uses the editable FPS target above for rendering. FPS and Physics TPS are separate settings; very high FPS can affect performance and gameplay timing."},
                 {"Physics TPS", cat::kPhysicsTpsSupported ? &s.physicsTpsEnabled : nullptr,
                  "physics-tps-enabled",
-                 cat::kPhysicsTpsSupported
-                    ? "Sets a separate Physics Ticks Per Second target. Any value other than 240 is considered cheating; high rates can change collisions and do not reproduce 2.1 physics."
-                    : "The independent Physics TPS hook is unavailable on macOS. FPS targeting still works."},
-                {"Frame Extrapolation"}, {"Vertical Sync"}, {"Lock Delta"},
+                 "Unavailable: the previous getModifiedDelta hook only returned a changed delta; it did not schedule extra GJBaseGameLayer::update calls. GD 2.2081 bindings expose no verified isolated physics-substep API. Kept disabled rather than reporting configured TPS as achieved."},
+                {"Frame Extrapolation", nullptr, nullptr,
+                 "Unavailable: CatHack has no visual prediction history or render-only prediction hook. GD's native Smooth Fix changes the director's global delta time; it is not future-position extrapolation and can affect gameplay timing, so it is not substituted here."},
+                {"Vertical Sync", cat::kVerticalSyncSupported ? &s.verticalSyncEnabled : nullptr,
+                 "vertical-sync",
+                 cat::kVerticalSyncSupported
+                    ? "Requests Geometry Dash's native vertical-sync setting. The display/driver may clamp FPS to its refresh rate; VSync does not set gameplay TPS or guarantee a particular FPS. Windows display-setting reloads cannot be intercepted because its 2.2081 loadVideoSettings binding is inline, so fullscreen/window transitions may reset VSync."
+                    : "Unavailable: the GD 2.2081 Android bindings do not expose a supported dynamic VSync control."},
+                {"Lock Delta"},
                 {"Borderless Classic"}, {"Fullscreen"},
             }},
             {"Keybinds", 8, Extra::None, false, {

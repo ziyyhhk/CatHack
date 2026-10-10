@@ -37,4 +37,20 @@ class $modify(BypassGameManager, GameManager) {
         if (cat::state().unlockIcons) return true;
         return GameManager::isColorUnlocked(id, type);
     }
+
+#if defined(GEODE_IS_MACOS) || defined(GEODE_IS_IOS)
+    void loadVideoSettings() {
+        GameManager::loadVideoSettings();
+        auto& state = cat::state();
+        if (state.displaySettingsLoaded) {
+            // These targets expose a hookable loadVideoSettings address. The
+            // Windows 2.2081 binding marks it inline, so do not install a hook
+            // there; CatHack still applies VSync directly on Windows.
+            cat::initializeVerticalSync(
+                this->getGameVariable(GameVar::VerticalSync),
+                state.verticalSyncEnabled
+            );
+        }
+    }
+#endif
 };

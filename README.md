@@ -1,11 +1,11 @@
 # CatHack Menu
 
-Mega Hack style mod menu for Geometry Dash 2.2081, built with Geode + ImGui.
-Press **Tab** to open or close it. Windows are draggable and remember their
-position and your settings.
+Mega Hack style mod menu for Geometry Dash 2.2081, targeting Geode SDK 5.11.0
+with ImGui. Press **Tab** to open or close it. Windows are draggable and
+remember their position and your settings.
 
-> **Build status: passing in GitHub Actions.** Individual gameplay hooks still need
-> in-game testing on Geometry Dash 2.2081.
+> **Verification:** the project is built in GitHub Actions. Gameplay and display
+> behavior still requires in-game testing on Geometry Dash 2.2081.
 
 ## Working hacks
 
@@ -16,18 +16,39 @@ position and your settings.
 | Cosmetic | No Death Effect | |
 | Level | Noclip | respects anticheat spike |
 | Cheat Safety | Safe Mode, Auto Safe Mode | sets `m_isTestMode` on completion so the run isn't saved |
-| Display | Unlock FPS, Physics TPS | Independent numeric targets; Physics TPS uses GD 2.2 fixed-step timing and is unavailable on macOS |
+| Display | Unlock FPS, Vertical Sync | FPS targeting uses the Cocos animation interval; native VSync is available on Windows, macOS and iOS |
 | CatHack | Interface Scale | ImGui font scale |
 
-The Display panel accepts any positive finite numeric FPS and Physics TPS
-value; invalid, zero, or negative entries are ignored. Physics TPS changes the
-simulation step separately from rendering. When enabled, the effective tick
-target is the higher of render FPS and Physics TPS. Any Physics TPS other than
-240 is treated as cheating by Auto Safe Mode. Non-default or extreme rates can
-change collision behavior, and this does not reproduce Geometry Dash 2.1
-physics. To avoid runaway update loops, the bypass limits catch-up work to 4096
-physics steps per rendered update; exceptionally high targets may therefore
-fall behind rather than being fully reached.
+The FPS field accepts any positive finite numeric value; invalid, zero, and
+negative values are rejected. Vertical Sync calls Geometry Dash's native
+`PlatformToolbox::toggleVerticalSync` binding and is kept separate from the FPS
+interval. VSync is only a request: the display, driver, and platform may clamp
+presentation to a refresh rate or ignore dynamic changes. The 2.2081 Android
+bindings do not expose this control, so the row remains unavailable there. The
+preference is saved by CatHack after the toggle is changed and applied after
+display settings are read at startup; without an explicit CatHack override, it
+follows Geometry Dash's own setting. macOS and iOS reapply after the hookable
+`GameManager::loadVideoSettings` call. The 2.2081 Windows binding marks that
+method inline, so CatHack cannot hook later settings reloads there; fullscreen
+or window transitions may reset VSync. Geode 5.11 exposes no mod-unload event,
+so CatHack cannot safely restore the prior native VSync state on dynamic unload;
+the setting is applied for the game process lifetime. These lifecycle behaviors
+have not been runtime-verified.
+
+**Physics TPS is intentionally unavailable.** Its separate positive-finite
+numeric target remains visible for settings compatibility, but is not applied
+to simulation. The earlier hook replaced
+`GJBaseGameLayer::getModifiedDelta(float)`, which returns a changed delta but
+does not itself schedule additional `GJBaseGameLayer::update` calls. Re-entering
+the whole update to manufacture more ticks could repeat input, triggers,
+collision checks, and `postUpdate` side effects. The 2.2081 bindings expose no
+verified isolated substep API, so CatHack does not claim the configured number
+is the achieved gameplay-update rate.
+
+**Frame Extrapolation is intentionally unavailable.** CatHack has no prediction
+history or render-only prediction path. GD's native Smooth Fix corrects the
+Director's global delta time; it is not future-position extrapolation and can
+affect gameplay timing, so it is not wired to this option.
 
 Every other row is a dimmed placeholder with a "Not implemented yet" tooltip.
 The menu is organized into MegaHack-style panels, including Bypass, Level,

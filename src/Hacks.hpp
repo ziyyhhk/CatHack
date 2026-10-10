@@ -14,6 +14,10 @@ struct State {
     bool textLength = false;
     bool fpsEnabled = false;
     bool physicsTpsEnabled = false;
+    bool verticalSyncEnabled = false;
+    bool verticalSyncPreferenceSaved = false; // whether CatHack has an explicit saved VSync override
+    bool verticalSyncInitialized = false; // runtime-only; set after native preference is applied
+    bool displaySettingsLoaded = false; // runtime-only; set after saved display settings are read
 
     float speed = 1.f;
     double fps = 240.0;
@@ -26,13 +30,21 @@ struct State {
 
 State& state();
 
-// GD 2.2081's macOS build does not expose a reliable hook for its modified
-// physics delta. FPS targeting still works there; the independent TPS hook does not.
-#if defined(GEODE_IS_MACOS)
+// GD 2.2081 exposes a per-frame modified-delta hook, but no verified API for
+// running additional gameplay updates independently from the render scheduler.
+// Do not advertise the current delta hook as a true TPS bypass.
 inline constexpr bool kPhysicsTpsSupported = false;
+
+// PlatformToolbox exposes Geometry Dash's native VSync toggle on Windows,
+// macOS and iOS. The 2.2081 Android bindings do not expose that control.
+#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS) || defined(GEODE_IS_IOS)
+inline constexpr bool kVerticalSyncSupported = true;
 #else
-inline constexpr bool kPhysicsTpsSupported = true;
+inline constexpr bool kVerticalSyncSupported = false;
 #endif
+
+void applyVerticalSync(bool enabled);
+void initializeVerticalSync(bool originalValue, bool enabled);
 
 // One row in a window. ptr == nullptr means "not implemented yet"
 // (the row is drawn dimmed and can't be toggled).
