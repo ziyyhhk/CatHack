@@ -7,12 +7,12 @@ State& state() {
     return s;
 }
 
-// Windows are placed column by column like the screenshot. Rows with only a
-// label are placeholders. To make one real, give it a bool in State, add a
-// pointer + save id here, and read the bool from a hook in hooks.cpp.
+// Windows are placed column by column like the reference menu. Rows with only
+// a label are intentionally disabled placeholders until their feature exists.
 std::vector<Window> const& layout() {
     static std::vector<Window> windows = [] {
         auto& s = state();
+        auto& d = display::settings();
         return std::vector<Window>{
             // ---- column 0
             {"CatHack", 0, Extra::Scale, false, {
@@ -27,7 +27,8 @@ std::vector<Window> const& layout() {
             {"Bypass", 1, Extra::None, false, {
                 {"Anti-Kick"}, {"Challenge Level"}, {"Keymaster"}, {"Main Levels"},
                 {"Music Customiser"}, {"Slider Limit"}, {"Text Length", &s.textLength, "text-length",
-                 "Removes the client-side character limit on text boxes. The servers still enforce their own limits."}, {"Treasure Room"},
+                 "Removes the client-side character limit on text boxes. The servers still enforce their own limits."},
+                {"Treasure Room"},
                 {"Unlock Icons", &s.unlockIcons, "unlock-icons",
                  "Treats every icon and color as unlocked in the garage. Local only, nothing is sent to the servers."},
                 {"Unlock Shops"}, {"Unlock Vaults"},
@@ -60,19 +61,28 @@ std::vector<Window> const& layout() {
             }},
 
             // ---- column 4
-            {"Player", 4, Extra::None, false, {
+            {"Level", 4, Extra::None, false, {
+                {"0% Practice Complete"}, {"Allow Pause Buffering"}, {"All Modes Platformer"},
+                {"Auto Clicker"}, {"Auto Deafen"}, {"Auto Kill"}, {"Auto Music Sync"},
+                {"Auto Pickup Coins"}, {"Auto Song Download"}, {"Click Between Frames"},
+                {"Click on Steps"}, {"Checkpoint Limit Bypass"}, {"Collect Coins in Practice"},
+                {"Confirm Exit"}, {"Confirm Full Reset"}, {"Confirm Normal"},
+                {"Confirm Practice"}, {"Confirm Reset"}, {"Force Ice"},
+                {"Force Platformer"}, {"Frame Step"}, {"Hitbox Multiplier"},
+                {"Instant Complete"}, {"Jumpscare"}, {"Jump Hack"},
                 {"Noclip", &s.noclip, "noclip",
                  "You cannot die (except to the anticheat spike). Marks the run as cheated."},
-                {"No Clip Accuracy"}, {"No Clip Deaths"}, {"No Mirror Portal"},
+                {"Noclip Limits"}, {"No Collision"}, {"No Mirror Portal"},
                 {"No Reverse"}, {"No Rotate"}, {"No Wave Collision"},
-                {"Show Hitboxes"}, {"Show Trajectory"},
-            }},
-            {"Bot", 4, Extra::None, false, {
-                {"Enabled"}, {"Record"}, {"Play"}, {"Save"}, {"Load"},
+                {"Pause During Complete"}, {"Practice Bug Fix"}, {"Practice Music"},
+                {"Random Seed"}, {"Replay Last Checkpoint"}, {"Respawn Time"},
+                {"Show Hitboxes"}, {"Show Hitboxes on Death"}, {"Show Hitboxes Trail"},
+                {"Show Layout"}, {"Show Trajectory"}, {"Show Triggers"},
+                {"Smart StartPos"}, {"StartPos Switcher"},
             }},
 
             // ---- column 5
-            {"Labels", 5, Extra::None, false, {
+            {"Status", 5, Extra::None, false, {
                 {"Field Formatting"}, {"Font: Big Font"}, {"Hide Status"}, {"Message"},
                 {"Testmode"}, {"Cheat Indicator"}, {"FPS Counter"}, {"CPS Counter"},
                 {"Best Run"}, {"Noclip Accuracy"}, {"Noclip Deaths"}, {"Attempts"},
@@ -104,10 +114,27 @@ std::vector<Window> const& layout() {
             }},
 
             // ---- column 8
-            {"Display", 8, Extra::Fps, false, {
-                {"Unlock FPS", &s.fpsEnabled, "unlock-fps",
-                 "Uses the FPS value above instead of the default 60."},
-                {"Frame Extrapolation"}, {"Vertical Sync"}, {"Lock Delta"},
+            {"Display", 8, Extra::Display, false, {
+                {"FPS Bypass", &d.fpsBypass, "unlock-fps",
+                 "Applies the independent FPS target above through GD's render timer. The observed frame-callback rate is reported separately and is not a hardware-present or monitor-refresh measurement."},
+                {"TPS Bypass", &d.tpsBypass, "physics-tps-enabled",
+                 "Applies the independent gameplay TPS target by running GJBaseGameLayer::update in bounded fixed-size substeps while PlayLayer is active. A 3000 TPS target is accepted; no 240 cap is used. Requests requiring steps shorter than 1 microsecond or longer than 250 milliseconds are retained but not applied. At most 512 calls run per outer update, so compare observed gameplay updates/s with the requested target. Any applied TPS other than 240 marks the run cheated and may change physics/collisions."},
+                {"HZ Bypass", cat::display::kHzBypassSupported ? &d.hzBypass : nullptr,
+                 "hz-bypass",
+                 cat::display::kHzBypassSupported
+                    ? "Calls Geometry Dash's native ForceTimer toggle. The binding establishes that it is a timer control, but its exact platform effect is not confirmed; it does not set the monitor's physical refresh rate and is separate from FPS, TPS, and VSync."
+                    : "Unavailable: the GD 2.2081 Android bindings do not expose the native ForceTimer dynamic setter. This feature does not change physical monitor refresh."},
+                {"Frame Extrapolation", cat::display::kFrameExtrapolationSupported ? &d.frameExtrapolation : nullptr,
+                 "frame-extrapolation",
+                 cat::display::kFrameExtrapolationSupported
+                    ? "Uses previous PlayerObject simulation positions, simulation-step delta, and monotonic sample timestamps to predict a bounded visual offset while the active PlayLayer subtree is visited for drawing. The base Cocos transform is restored before the visit returns; authoritative player position and collision state are not changed. History resets on death, pause/resume, restart, discontinuities, and scene exit."
+                    : "Unavailable on Android: the GD 2.2081 bindings do not expose the GJBaseGameLayer::visit hook needed to apply a render-only offset. The feature is implemented on Windows, macOS, and iOS; it is not substituted with Smooth Fix or a gameplay-position change."},
+                {"Vertical Sync", cat::display::kVerticalSyncSupported ? &d.verticalSync : nullptr,
+                 "vertical-sync",
+                 cat::display::kVerticalSyncSupported
+                    ? "Requests Geometry Dash's native VSync setting. VSync is separate from FPS/TPS and may clamp rendering to the display. CatHack reapplies saved preferences after a render-context reset or viewport resize; the Windows 2.2081 loadVideoSettings binding is inline, so a transition that triggers neither may reset the native setting."
+                    : "Unavailable: the GD 2.2081 Android bindings do not expose a supported dynamic VSync control."},
+                {"Lock Delta"},
                 {"Borderless Classic"}, {"Fullscreen"},
             }},
             {"Keybinds", 8, Extra::None, false, {
@@ -119,6 +146,11 @@ std::vector<Window> const& layout() {
             {"Utility", 9, Extra::None, true, {
                 {"Uncomplete Level"}, {"Restart Level"}, {"Practice Mode"},
                 {"Settings"}, {"Resources"}, {"AppData"}, {"Toggle DevTools"},
+            }},
+            {"Replay", 9, Extra::None, false, {
+                {"Record"}, {"Play"}, {"Filename"}, {"Auto-save"}, {"Save"},
+                {"Clear & New"}, {"Delete"}, {"Gameplay Options"},
+                {"Convert (.json, .gdr)"}, {"Open Folder"},
             }},
         };
     }();
