@@ -12,6 +12,7 @@ State& state() {
 std::vector<Window> const& layout() {
     static std::vector<Window> windows = [] {
         auto& s = state();
+        auto& d = display::settings();
         return std::vector<Window>{
             // ---- column 0
             {"CatHack", 0, Extra::Scale, false, {
@@ -114,17 +115,24 @@ std::vector<Window> const& layout() {
 
             // ---- column 8
             {"Display", 8, Extra::Display, false, {
-                {"Unlock FPS", &s.fpsEnabled, "unlock-fps",
-                 "Uses the editable FPS target above for rendering. FPS and Physics TPS are separate settings; very high FPS can affect performance and gameplay timing."},
-                {"Physics TPS", cat::kPhysicsTpsSupported ? &s.physicsTpsEnabled : nullptr,
-                 "physics-tps-enabled",
-                 "Unavailable: the previous getModifiedDelta hook only returned a changed delta; it did not schedule extra GJBaseGameLayer::update calls. GD 2.2081 bindings expose no verified isolated physics-substep API. Kept disabled rather than reporting configured TPS as achieved."},
-                {"Frame Extrapolation", nullptr, nullptr,
-                 "Unavailable: CatHack has no visual prediction history or render-only prediction hook. GD's native Smooth Fix changes the director's global delta time; it is not future-position extrapolation and can affect gameplay timing, so it is not substituted here."},
-                {"Vertical Sync", cat::kVerticalSyncSupported ? &s.verticalSyncEnabled : nullptr,
+                {"FPS Bypass", &d.fpsBypass, "unlock-fps",
+                 "Applies the independent FPS target above through GD's render timer. The observed frame-callback rate is reported separately and is not a hardware-present or monitor-refresh measurement."},
+                {"TPS Bypass", &d.tpsBypass, "physics-tps-enabled",
+                 "Applies the independent gameplay TPS target by running GJBaseGameLayer::update in bounded fixed-size substeps while PlayLayer is active. A 3000 TPS target is accepted; no 240 cap is used. Requests requiring steps shorter than 1 microsecond or longer than 250 milliseconds are retained but not applied. At most 512 calls run per outer update, so compare observed gameplay updates/s with the requested target. Any applied TPS other than 240 marks the run cheated and may change physics/collisions."},
+                {"HZ Bypass", cat::display::kHzBypassSupported ? &d.hzBypass : nullptr,
+                 "hz-bypass",
+                 cat::display::kHzBypassSupported
+                    ? "Calls Geometry Dash's native ForceTimer toggle. The binding establishes that it is a timer control, but its exact platform effect is not confirmed; it does not set the monitor's physical refresh rate and is separate from FPS, TPS, and VSync."
+                    : "Unavailable: the GD 2.2081 Android bindings do not expose the native ForceTimer dynamic setter. This feature does not change physical monitor refresh."},
+                {"Frame Extrapolation", cat::display::kFrameExtrapolationSupported ? &d.frameExtrapolation : nullptr,
+                 "frame-extrapolation",
+                 cat::display::kFrameExtrapolationSupported
+                    ? "Uses previous PlayerObject simulation positions, simulation-step delta, and monotonic sample timestamps to predict a bounded visual offset while the active PlayLayer subtree is visited for drawing. The base Cocos transform is restored before the visit returns; authoritative player position and collision state are not changed. History resets on death, pause/resume, restart, discontinuities, and scene exit."
+                    : "Unavailable on Android: the GD 2.2081 bindings do not expose the GJBaseGameLayer::visit hook needed to apply a render-only offset. The feature is implemented on Windows, macOS, and iOS; it is not substituted with Smooth Fix or a gameplay-position change."},
+                {"Vertical Sync", cat::display::kVerticalSyncSupported ? &d.verticalSync : nullptr,
                  "vertical-sync",
-                 cat::kVerticalSyncSupported
-                    ? "Requests Geometry Dash's native vertical-sync setting. The display/driver may clamp FPS to its refresh rate; VSync does not set gameplay TPS or guarantee a particular FPS. Windows display-setting reloads cannot be intercepted because its 2.2081 loadVideoSettings binding is inline, so fullscreen/window transitions may reset VSync."
+                 cat::display::kVerticalSyncSupported
+                    ? "Requests Geometry Dash's native VSync setting. VSync is separate from FPS/TPS and may clamp rendering to the display. CatHack reapplies saved preferences after a render-context reset or viewport resize; the Windows 2.2081 loadVideoSettings binding is inline, so a transition that triggers neither may reset the native setting."
                     : "Unavailable: the GD 2.2081 Android bindings do not expose a supported dynamic VSync control."},
                 {"Lock Delta"},
                 {"Borderless Classic"}, {"Fullscreen"},

@@ -6,7 +6,6 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
-#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -29,9 +28,7 @@ constexpr ImU32 kBlack = IM_COL32(0, 0, 0, 255);
 constexpr float kRowAnim = 0.18f;
 constexpr float kCollapseAnim = 0.20f;
 constexpr float kFadeAnim = 0.14f;
-constexpr int kMenuLayoutVersion = 5;
-constexpr double kFpsWarningThreshold = 360.0;
-constexpr double kPhysicsWarningThreshold = 240.0;
+constexpr int kMenuLayoutVersion = 6;
 
 // ---------------------------------------------------------------- state
 struct WinState {
@@ -45,8 +42,6 @@ struct WinState {
 bool g_open = false;
 float g_fade = 0.f;
 float g_scale = 0.8f; // applied scale (only updated after you let go of the slider)
-double g_lastValidFps = 240.0;
-double g_lastValidPhysicsTps = 240.0;
 float g_savedViewportWidth = 0.f;
 float g_savedViewportHeight = 0.f;
 float g_savedLayoutScale = 0.f;
@@ -112,7 +107,9 @@ std::string fitText(const char* text, float maxWidth, bool& wasTruncated) {
 }
 
 int extraRowCount(cat::Extra extra) {
-    return extra == cat::Extra::Display ? 2 : (extra == cat::Extra::None ? 0 : 1);
+    return extra == cat::Extra::Display
+        ? cat::display::controlsRowCount()
+        : (extra == cat::Extra::None ? 0 : 1);
 }
 
 float windowExpandedHeight(cat::Window const& w, float rowH) {
@@ -126,37 +123,19 @@ float windowHeight(cat::Window const& w, WinState const& ws, float rowH, float m
     return rowH + (openHeight - rowH) * ws.openT;
 }
 
-double sanitizeRate(double value, double fallback) {
-    return std::isfinite(value) && value > 0.0 ? value : fallback;
-}
-
 // ---------------------------------------------------------------- config
 void saveConfig() {
     auto* mod = Mod::get();
     auto& s = cat::state();
-    s.fps = sanitizeRate(s.fps, g_lastValidFps);
-    s.physicsTps = sanitizeRate(s.physicsTps, g_lastValidPhysicsTps);
-    g_lastValidFps = s.fps;
-    g_lastValidPhysicsTps = s.physicsTps;
 
     for (auto& w : cat::layout()) {
+        if (w.extra == cat::Extra::Display) continue;
         for (auto& e : w.entries) {
-            if (e.ptr && e.id && e.ptr != &s.verticalSyncEnabled) {
-                mod->setSavedValue<bool>(e.id, *e.ptr);
-            }
+            if (e.ptr && e.id) mod->setSavedValue<bool>(e.id, *e.ptr);
         }
     }
     mod->setSavedValue<double>("speed", s.speed);
-    mod->setSavedValue<double>("fps", s.fps);
-    mod->setSavedValue<double>("physics-tps", s.physicsTps);
-    if constexpr (cat::kPhysicsTpsSupported) {
-        mod->setSavedValue<bool>("physics-tps-enabled", s.physicsTpsEnabled);
-    } else {
-        mod->setSavedValue<bool>("physics-tps-enabled", false);
-    }
-    if (s.verticalSyncPreferenceSaved) {
-        mod->setSavedValue<bool>("vertical-sync", s.verticalSyncEnabled);
-    }
+    cat::display::saveConfig();
     mod->setSavedValue<double>("interface-scale", s.interfaceScale);
     mod->setSavedValue<int>("menu-layout-version", kMenuLayoutVersion);
     mod->setSavedValue<double>("menu-viewport-width", g_savedViewportWidth);
@@ -182,6 +161,7 @@ void saveConfig() {
 void loadConfig() {
     auto* mod = Mod::get();
     auto& s = cat::state();
+    cat::display::loadConfig();
 
     int savedLayoutVersion = mod->getSavedValue<int>("menu-layout-version", 0);
     g_resetWindowPositions = savedLayoutVersion != kMenuLayoutVersion;
@@ -191,8 +171,10 @@ void loadConfig() {
     g_savedColumnsPerRow = mod->getSavedValue<int>("menu-grid-columns", 0);
 
     for (auto& w : cat::layout()) {
-        for (auto& e : w.entries) {
-            if (e.ptr && e.id) *e.ptr = mod->getSavedValue<bool>(e.id, *e.ptr);
+        if (w.extra != cat::Extra::Display) {
+            for (auto& e : w.entries) {
+                if (e.ptr && e.id) *e.ptr = mod->getSavedValue<bool>(e.id, *e.ptr);
+            }
         }
 
         std::string title = w.title;
@@ -211,26 +193,6 @@ void loadConfig() {
     }
 
     s.speed = static_cast<float>(mod->getSavedValue<double>("speed", s.speed));
-    s.fps = sanitizeRate(mod->getSavedValue<double>("fps", s.fps), s.fps);
-    s.physicsTps = sanitizeRate(mod->getSavedValue<double>("physics-tps", s.physicsTps), s.physicsTps);
-    g_lastValidFps = s.fps;
-    g_lastValidPhysicsTps = s.physicsTps;
-    if constexpr (cat::kPhysicsTpsSupported) {
-        s.physicsTpsEnabled = mod->getSavedValue<bool>("physics-tps-enabled", s.physicsTpsEnabled);
-    } else {
-        s.physicsTpsEnabled = false;
-    }
-    bool originalVerticalSync = false;
-#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS) || defined(GEODE_IS_IOS)
-    if (auto* gameManager = GameManager::get()) {
-        originalVerticalSync = gameManager->getGameVariable(GameVar::VerticalSync);
-    }
-#endif
-    s.verticalSyncPreferenceSaved = mod->hasSavedValue("vertical-sync");
-    s.verticalSyncEnabled = s.verticalSyncPreferenceSaved
-        ? mod->getSavedValue<bool>("vertical-sync")
-        : originalVerticalSync;
-    s.displaySettingsLoaded = true;
     if (savedLayoutVersion < kMenuLayoutVersion) {
         // The previous default was oversized; start the compact layout at a
         // smaller scale once, then preserve the user's future slider choice.
@@ -243,15 +205,6 @@ void loadConfig() {
         );
     }
     g_scale = s.interfaceScale;
-}
-
-void applyFps() {
-    auto& s = cat::state();
-    s.fps = sanitizeRate(s.fps, 240.0);
-    double targetFps = s.fpsEnabled ? s.fps : 60.0;
-    double interval = 1.0 / targetFps;
-    if (!std::isfinite(interval)) interval = DBL_MAX;
-    CCApplication::sharedApplication()->setAnimationInterval(interval);
 }
 
 void setOpen(bool open) {
@@ -362,11 +315,7 @@ bool toggleRow(cat::Entry const& e, bool centered) {
     bool pressed = false;
     if (implemented && ImGui::IsItemClicked()) {
         *e.ptr = !*e.ptr;
-        if (e.ptr == &cat::state().verticalSyncEnabled) {
-            cat::state().verticalSyncPreferenceSaved = true;
-        }
         pressed = true;
-        saveConfig();
     }
 
     float hoverT = animated(ImGui::GetID((std::string(e.label) + "-h").c_str()), hovered ? 1.f : 0.f, ImGui::GetIO().DeltaTime, kRowAnim);
@@ -405,38 +354,6 @@ bool toggleRow(cat::Entry const& e, bool centered) {
     return pressed;
 }
 
-void rateInputRow(const char* label, const char* id, double& rate, double& lastValidRate, double warningThreshold, bool warnOnNonDefault, const char* warningText, const char* tooltip, bool applyRenderTarget) {
-    ImGui::TextUnformatted(label);
-    ImGui::SameLine(0.f, 4.f);
-    ImGui::SetNextItemWidth(-1.f);
-    ImGui::InputDouble(id, &rate, 0.0, 0.0, "%.15g", ImGuiInputTextFlags_CharsScientific);
-
-    const bool invalidRate = !std::isfinite(rate) || rate <= 0.0;
-    if (invalidRate && !ImGui::IsItemActive()) {
-        rate = lastValidRate;
-    } else if (!invalidRate) {
-        lastValidRate = rate;
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        if (invalidRate) rate = lastValidRate > 0.0 ? lastValidRate : 240.0;
-        if (!applyRenderTarget && cat::kPhysicsTpsSupported &&
-            cat::state().physicsTpsEnabled && rate != 240.0) {
-            cat::state().cheated = true;
-        }
-        if (applyRenderTarget && cat::state().fpsEnabled) applyFps();
-        saveConfig();
-    }
-    if (ImGui::IsItemHovered() && ImGui::GetCurrentContext()->HoveredIdTimer > 0.45f) {
-        ImGui::BeginTooltip();
-        bool isNonDefault = rate != warningThreshold;
-        if (warnOnNonDefault ? isNonDefault : rate > warningThreshold) {
-            ImGui::TextUnformatted(warningText);
-        }
-        ImGui::TextUnformatted(tooltip);
-        ImGui::EndTooltip();
-    }
-}
-
 void extraRow(cat::Extra extra) {
     if (extra == cat::Extra::None) return;
     auto& s = cat::state();
@@ -457,18 +374,7 @@ void extraRow(cat::Extra extra) {
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) saveConfig();
     } else if (extra == cat::Extra::Display) {
-        rateInputRow(
-            "FPS", "##fps-input", s.fps, g_lastValidFps, kFpsWarningThreshold, false,
-            "Warning: rates above 360 may affect performance and gameplay timing.",
-            "Render FPS only. Type any positive finite value. High targets may be limited by your display or system and can affect gameplay timing.",
-            true
-        );
-        rateInputRow(
-            "TPS (not applied)", "##physics-tps-input", s.physicsTps, g_lastValidPhysicsTps, kPhysicsWarningThreshold, true,
-            "Warning: if enabled by a future verified implementation, any TPS other than 240 counts as cheating and may change collisions. CatHack does not currently apply this target.",
-            "Physics TPS is kept as a separate positive-finite numeric target, but is not applied to simulation: GD 2.2081 bindings expose no verified isolated physics-substep API, and the old modified-delta hook did not schedule extra gameplay updates. Any applied TPS other than 240 counts as cheating; high TPS can alter physics.",
-            false
-        );
+        cat::display::drawControls();
     }
     ImGui::PopItemWidth();
 }
@@ -509,15 +415,9 @@ void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH, fl
             extraRow(w.extra);
             for (auto& e : w.entries) {
                 bool pressed = toggleRow(e, w.centered);
-                // Keep rendering FPS and native VSync as separate controls.
-                if (pressed && e.ptr == &cat::state().fpsEnabled) applyFps();
-                if (pressed && e.ptr == &cat::state().verticalSyncEnabled) {
-                    cat::applyVerticalSync(cat::state().verticalSyncEnabled);
-                }
-                if (pressed && cat::kPhysicsTpsSupported &&
-                    e.ptr == &cat::state().physicsTpsEnabled &&
-                    cat::state().physicsTpsEnabled && cat::state().physicsTps != 240.0) {
-                    cat::state().cheated = true;
+                if (pressed) {
+                    cat::display::onToggle(e.id ? e.id : "");
+                    saveConfig();
                 }
             }
         }
@@ -527,30 +427,16 @@ void drawWindow(cat::Window const& w, ImVec2 defPos, float width, float rowH, fl
 }
 
 void drawFrame() {
-#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS) || defined(GEODE_IS_IOS)
-    auto& displayState = cat::state();
-    if (displayState.displaySettingsLoaded && !displayState.verticalSyncInitialized) {
-        // If GameManager did not exist during mod loading, defer the first
-        // native call until its engine-owned preference is available.
-        if (auto* gameManager = GameManager::get()) {
-            cat::initializeVerticalSync(
-                gameManager->getGameVariable(GameVar::VerticalSync),
-                displayState.verticalSyncEnabled
-            );
-        }
-    }
-#endif
-
-    static bool first = true;
-    if (first) {
-        first = false;
-        if (cat::state().fpsEnabled) applyFps();
-    }
+    // ImGuiCocos invokes this callback once per rendered frame on all targets.
+    // It also provides a platform-neutral point to apply persisted preferences.
+    cat::display::onFrame();
+    cat::display::fps::recordRenderCallback();
 
     ImGuiIO& io = ImGui::GetIO();
     bool viewportChanged = g_savedViewportWidth <= 0.f || g_savedViewportHeight <= 0.f ||
         std::abs(g_savedViewportWidth - io.DisplaySize.x) > 1.f ||
         std::abs(g_savedViewportHeight - io.DisplaySize.y) > 1.f;
+    if (viewportChanged) cat::display::onRenderContextReinitialized();
     bool scaleChanged = g_savedLayoutScale <= 0.f || std::abs(g_savedLayoutScale - g_scale) > 0.001f;
     if (g_resetWindowPositions || viewportChanged || scaleChanged) {
         for (auto& w : cat::layout()) {
@@ -671,6 +557,7 @@ $on_mod(Loaded) {
             // Reapply the theme and bundled font whenever ImGui's context is
             // initialized or reloaded (for example, after toggling fullscreen).
             applyTheme();
+            cat::display::onRenderContextReinitialized();
         })
         .draw([] {
             drawFrame();
